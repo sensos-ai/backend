@@ -2,7 +2,7 @@ import { expect, onTestFinished, test } from 'bun:test'
 import type { UIMessage } from 'ai'
 import { actor, setup } from 'rivetkit'
 import { setupTest } from 'rivetkit/test'
-import { sessionDatabase } from '@/registry/actors/session/db/database'
+import { sessionDatabase } from '@/runtime/actors/session/db/database'
 import {
   deleteSessionData,
   finalizeRun,
@@ -13,7 +13,7 @@ import {
   requestRunCancellation,
   setSessionTitle,
   submitRun,
-} from '@/registry/actors/session/db/queries'
+} from '@/runtime/actors/session/db/queries'
 
 const queryTestActor = actor({
   db: sessionDatabase,

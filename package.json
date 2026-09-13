@@ -5,7 +5,7 @@
   "type": "module",
   "bin": {
     "sensos": "./dist/sensos",
-    "sensos-dev": "./src/sensos/bootstrap.ts"
+    "sensos-dev": "./src/cli/bootstrap.ts"
   },
   "scripts": {
     "dev": "bun run --watch src/server.ts",
@@ -23,7 +23,6 @@
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.80",
     "@inquirer/prompts": "^8.7.2",
-    "@modelcontextprotocol/server": "2.0.0",
     "@rivet-dev/agentos": "^0.2.19",
     "ai": "^7.0.97",
     "drizzle-orm": "0.45.2",

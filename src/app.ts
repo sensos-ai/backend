@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { stream, streamText } from 'hono/streaming'
-import registry from './registry'
+import { streamText } from 'hono/streaming'
+import { registry } from './runtime/actors/registry'
 
 const app = new Hono()
 app.use('*', cors())

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { UIMessage } from 'ai'
-import { createHarness } from '@/lib/harness'
+import { createHarness } from '@/chat/harness'
 
 describe('createHarness', () => {
   test('accepts and exposes initial messages', () => {

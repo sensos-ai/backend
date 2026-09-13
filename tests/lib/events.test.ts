@@ -6,7 +6,7 @@ import {
   aiEmitter,
   flushAIEventLog,
   startAIEventLogListener,
-} from '@/lib/events'
+} from '@/shared/events'
 
 let directory: string | undefined
 

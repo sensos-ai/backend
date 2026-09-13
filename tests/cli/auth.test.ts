@@ -7,7 +7,7 @@ import {
   providerProfilePath,
   readProviderProfile,
   writeProviderProfile,
-} from '@/sensos/auth'
+} from '@/auth/profile'
 
 describe('provider profile', () => {
   test('persists private provider credentials outside project state', async () => {

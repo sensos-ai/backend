@@ -35,7 +35,7 @@ Relevant implementation:
 - [`runtime.ts`](/Users/nicolas/Projects/sensos-v2/backend/src/sensos/runtime.ts)
 - [`runtime-assets.ts`](/Users/nicolas/Projects/sensos-v2/backend/src/sensos/runtime-assets.ts)
 - [`sessions.ts`](/Users/nicolas/Projects/sensos-v2/backend/src/sensos/sessions.ts)
-- [`lifecycle.ts`](/Users/nicolas/Projects/sensos-v2/backend/src/registry/actors/session/lifecycle.ts)
+- [`lifecycle.ts`](/Users/nicolas/Projects/sensos-v2/backend/src/runtime/actors/session/lifecycle.ts)
 
 ### Remaining implementation detail
 

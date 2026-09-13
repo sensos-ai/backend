@@ -3,7 +3,7 @@ import type { ChatTransport, UIMessage } from 'ai'
 import {
   AgentTUIRunner,
   type AgentTUIRenderer,
-} from '@/lib/tui/agent-tui-runner'
+} from '@/chat/tui/agent-tui-runner'
 
 const restoredMessages: UIMessage[] = [
   {

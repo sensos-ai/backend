@@ -79,7 +79,7 @@ const makeNativeRuntimeBundlable: BunPlugin = {
   name: 'bundle-rivetkit-native-runtime',
   setup(build) {
     build.onLoad(
-      { filter: /src\/sensos\/runtime-assets\.ts$/ },
+      { filter: /src\/runtime\/assets\.ts$/ },
       async ({ path }) => {
         const source = await Bun.file(path).text()
         return {
@@ -94,7 +94,7 @@ const makeNativeRuntimeBundlable: BunPlugin = {
       }
     )
     build.onLoad(
-      { filter: /src\/sensos\/agentos-assets\.ts$/ },
+      { filter: /src\/runtime\/agentos-assets\.ts$/ },
       async ({ path }) => {
         const source = await Bun.file(path).text()
         return {
@@ -134,7 +134,7 @@ const makeNativeRuntimeBundlable: BunPlugin = {
 }
 
 const result = await Bun.build({
-  entrypoints: ['src/sensos/bootstrap.ts'],
+  entrypoints: ['src/cli/bootstrap.ts'],
   plugins: [makeNativeRuntimeBundlable],
   minify: true,
   sourcemap: 'linked',

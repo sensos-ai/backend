@@ -1,21 +1,21 @@
 import { Database } from 'bun:sqlite'
 import { describe, expect, test } from 'bun:test'
-import initialMigration from '@/registry/actors/session/db/drizzle/0000_old_luckman.sql' with {
+import initialMigration from '@/runtime/actors/session/db/drizzle/0000_old_luckman.sql' with {
   type: 'text',
 }
-import durableChatMigration from '@/registry/actors/session/db/drizzle/0001_tidy_lockjaw.sql' with {
+import durableChatMigration from '@/runtime/actors/session/db/drizzle/0001_tidy_lockjaw.sql' with {
   type: 'text',
 }
-import runMetadataMigration from '@/registry/actors/session/db/drizzle/0002_violet_blindfold.sql' with {
+import runMetadataMigration from '@/runtime/actors/session/db/drizzle/0002_violet_blindfold.sql' with {
   type: 'text',
 }
-import sessionTitleMigration from '@/registry/actors/session/db/drizzle/0003_lyrical_morlocks.sql' with {
+import sessionTitleMigration from '@/runtime/actors/session/db/drizzle/0003_lyrical_morlocks.sql' with {
   type: 'text',
 }
-import runModelMigration from '@/registry/actors/session/db/drizzle/0004_outstanding_bullseye.sql' with {
+import runModelMigration from '@/runtime/actors/session/db/drizzle/0004_outstanding_bullseye.sql' with {
   type: 'text',
 }
-import removeResolvedModelMigration from '@/registry/actors/session/db/drizzle/0005_wealthy_silverclaw.sql' with {
+import removeResolvedModelMigration from '@/runtime/actors/session/db/drizzle/0005_wealthy_silverclaw.sql' with {
   type: 'text',
 }
 

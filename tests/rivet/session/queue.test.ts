@@ -2,8 +2,8 @@ import { expect, onTestFinished, test } from 'bun:test'
 import type { UIMessage } from 'ai'
 import { setup } from 'rivetkit'
 import { setupTest } from 'rivetkit/test'
-import { createIdGeneratorWithPrefix } from '@/lib/utils'
-import { sessionAgent } from '@/registry/actors/session'
+import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import { sessionAgent } from '@/runtime/actors/session'
 
 const createTestId = createIdGeneratorWithPrefix('queue_test')
 

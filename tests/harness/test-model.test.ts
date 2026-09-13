@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createTestLanguageModel,
   testModelEnabled,
-} from '@/lib/harness/providers/test-model'
+} from '@/chat/harness/providers/test-model'
 
 describe('test model', () => {
   test('enables only for the exact value 1', () => {

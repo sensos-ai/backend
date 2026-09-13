@@ -6,7 +6,7 @@ import {
   shouldGenerateSessionTitle,
   TITLE_MODEL,
   userMessageText,
-} from '@/registry/actors/session/title'
+} from '@/runtime/actors/session/title'
 
 const usage = {
   inputTokens: {

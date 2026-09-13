@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveRuntimeIdleTtl } from '../../src/sensos/runtime'
+import { resolveRuntimeIdleTtl } from '../../src/runtime'
 
 describe('runtime idle TTL', () => {
   test('uses an intentional bounded configuration', () => {

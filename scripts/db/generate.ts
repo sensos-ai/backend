@@ -17,7 +17,7 @@ const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../..'
 )
-const actorsRoot = resolve(repositoryRoot, 'src/registry/actors')
+const actorsRoot = resolve(repositoryRoot, 'src/runtime/actors')
 
 async function findConfigs(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true })

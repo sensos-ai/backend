@@ -3,13 +3,13 @@ import type { UIMessage, UIMessageChunk } from 'ai'
 import type {
   FrameEvent,
   StatusChangedEvent,
-} from '@/registry/actors/session/config'
-import type { RunRow, RunStatus } from '@/registry/actors/session/db'
+} from '@/runtime/actors/session/config'
+import type { RunRow, RunStatus } from '@/runtime/actors/session/db'
 import {
   DeferredSessionChatTransport,
   SessionChatTransport,
   type SessionConnection,
-} from '@/client/session-chat-transport'
+} from '@/chat/transport/session-chat-transport'
 
 const userMessage: UIMessage = {
   id: 'message-1',

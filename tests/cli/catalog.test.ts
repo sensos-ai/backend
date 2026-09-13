@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { openSessionCatalog } from '@/sensos/catalog'
+import { openSessionCatalog } from '@/storage/session-catalog'
 
 test('catalog reserves, revises, tombstones, and purges sessions', async () => {
   const directory = await mkdtemp('/tmp/sensos-catalog-')

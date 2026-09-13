@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createState,
   parseAgentOsSoftwarePaths,
-} from '@/registry/actors/session/lifecycle'
+} from '@/runtime/actors/session/lifecycle'
 
 describe('parseAgentOsSoftwarePaths', () => {
   test('preserves normal server defaults when configuration is absent', () => {

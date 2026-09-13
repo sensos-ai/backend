@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
-import { materializeVersionedAsset } from '../../src/sensos/runtime-assets'
+import { materializeVersionedAsset } from '../../src/runtime/assets'
 
 describe('runtime asset materialization', () => {
   test('reuses a verified content-addressed asset and repairs corruption', async () => {

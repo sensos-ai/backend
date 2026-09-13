@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { productConfigDir, productStateDir } from '@/sensos/paths'
+import { productConfigDir, productStateDir } from '@/config/paths'
 
 describe('sensos product paths', () => {
   test('uses XDG config and state roots when configured', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveHarnessFeatures } from '@/lib/harness/features'
+import { resolveHarnessFeatures } from '@/chat/harness/features'
 
 describe('resolveHarnessFeatures', () => {
   test('resolves environment flags into a complete transportable value', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { removeSensosProfileBlocks } from '@/sensos/maintenance'
+import { removeSensosProfileBlocks } from '@/cli/commands/maintenance'
 
 describe('sensos maintenance', () => {
   test('removes only the managed sensos shell block', () => {

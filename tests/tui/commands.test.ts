@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   findSlashCommand,
   matchingSlashCommands,
-} from '@/lib/tui/commands'
+} from '@/chat/tui/commands'
 
 const commands = [
   { name: '/model' as const, description: 'model', run: () => undefined },

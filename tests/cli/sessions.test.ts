@@ -4,12 +4,12 @@ import {
   listLocalSessions,
   pickLocalSession,
   pickLocalSessions,
-} from '@/sensos/sessions'
+} from '@/cli/commands/sessions'
 import {
   deleteLocalSessionActor,
   waitForLocalSessionDeletion,
-} from '@/sensos/runtime-sessions'
-import type { SessionCatalog } from '@/sensos/catalog'
+} from '@/runtime/sessions'
+import type { SessionCatalog } from '@/storage/session-catalog'
 
 describe('saved session picker', () => {
   test('lists active sessions directly from the catalog', async () => {

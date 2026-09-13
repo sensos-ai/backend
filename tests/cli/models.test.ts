@@ -3,7 +3,7 @@ import {
   CHAT_MODELS,
   commandArguments,
   resumeArguments,
-} from '@/sensos/models'
+} from '@/config/models'
 
 describe('sensos models and resume arguments', () => {
   test('uses the three explicit gateway model ids', () => {

@@ -1,8 +1,8 @@
 import type { UIMessage } from 'ai'
 import { createClient } from 'rivetkit/client'
-import type registry from './registry'
-import { createIdGeneratorWithPrefix } from '@/lib/utils'
-import type { SessionConnection } from '@/client/session-chat-transport'
+import type { registry } from './runtime/actors/registry'
+import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import type { SessionConnection } from '@/chat/transport/session-chat-transport'
 
 const client = createClient<typeof registry>('http://localhost:6420')
 const createClientId = createIdGeneratorWithPrefix('cli')
