@@ -1,0 +1,1 @@
+ALTER TABLE `session_meta` ADD `title` text;

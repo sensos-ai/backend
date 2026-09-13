@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789163576593,
+      "tag": "0000_old_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789223496286,
+      "tag": "0001_tidy_lockjaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789244988300,
+      "tag": "0002_violet_blindfold",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789245760745,
+      "tag": "0003_lyrical_morlocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789259481352,
+      "tag": "0004_outstanding_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789259603123,
+      "tag": "0005_wealthy_silverclaw",
+      "breakpoints": true
+    }
+  ]
+}
