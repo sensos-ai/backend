@@ -8,7 +8,7 @@ test('runtime startup failure is actionable and leaves no orphan resources', asy
     { failRuntimeStartup: true }
   )
   try {
-    const screen = await cli.waitForScreen('Agent failed', 30_000)
+    const screen = await cli.waitForScreen('● Failed', 30_000)
     expect(screen).toContain('Local runtime supervisor timed out')
     await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)

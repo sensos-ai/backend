@@ -404,7 +404,7 @@ export async function startCliE2E(
   }
   try {
     await api.waitForScreen(
-      options.failRuntimeStartup ? 'Waking agent' : 'Agent ready',
+      options.failRuntimeStartup ? 'Waking…' : '● Ready',
       20_000
     )
     return api
