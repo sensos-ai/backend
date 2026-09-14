@@ -1,6 +1,6 @@
 import {
-  deleteSessionData,
   appendMessageIfAbsent,
+  deleteSessionData,
   getRun as getRunFromDB,
   getSessionMeta,
   listMessages,
@@ -52,37 +52,24 @@ const deliver: SessionActions['deliver'] = async (
   }
 
   await context.queue.send('inbox', inboxMessage)
-  if (!shouldSteer || !activeRun) {
-    const receipt = {
-      id: inboxMessage.id,
-      status: 'queued',
-      origin: inboxMessage.origin,
-    } satisfies DeliveryRoutedEvent
-    context.broadcast('deliveryRouted', receipt)
-    return receipt
-  }
-
-  const message = {
-    ...inboxMessage.message,
-    metadata: {
-      ...(inboxMessage.message.metadata &&
-      typeof inboxMessage.message.metadata === 'object'
-        ? inboxMessage.message.metadata
-        : {}),
-      sensosOrigin: inboxMessage.origin,
-    },
-  }
-  const appended = await appendMessageIfAbsent(
-    context.db,
-    message,
-    new Date(inboxMessage.createdAt)
-  )
-  if (appended.created) {
-    const steeringMessage = { message, origin: inboxMessage.origin }
+  if (shouldSteer && activeRun) {
+    const message = {
+      ...inboxMessage.message,
+      metadata: {
+        ...(inboxMessage.message.metadata &&
+        typeof inboxMessage.message.metadata === 'object'
+          ? inboxMessage.message.metadata
+          : {}),
+        sensosOrigin: inboxMessage.origin,
+      },
+    }
     const accepted =
       inboxMessage.priority === 'now'
-        ? activeRun.interrupt(steeringMessage)
-        : activeRun.steering.push(steeringMessage)
+        ? activeRun.interrupt({ message, origin: inboxMessage.origin })
+        : activeRun.steering.push({
+            message,
+            origin: inboxMessage.origin,
+          })
     if (!accepted) {
       const receipt = {
         id: inboxMessage.id,
@@ -93,20 +80,38 @@ const deliver: SessionActions['deliver'] = async (
       context.broadcast('deliveryRouted', receipt)
       return receipt
     }
-    const messages = await listMessages(context.db)
-    context.broadcast('messagesChanged', {
-      messages,
-      revision: appended.revision,
-    })
+
+    if (inboxMessage.priority === 'adaptive') {
+      const appended = await appendMessageIfAbsent(
+        context.db,
+        message,
+        new Date(inboxMessage.createdAt)
+      )
+      context.broadcast('messagesChanged', {
+        messages: await listMessages(context.db),
+        revision: appended.revision,
+      })
+    }
+
+    const receipt = {
+      id: inboxMessage.id,
+      status: 'steered',
+      runId: activeRun.runId,
+      origin: inboxMessage.origin,
+    } satisfies DeliveryRoutedEvent
+    context.broadcast('deliveryRouted', receipt)
+    return receipt
   }
-  const receipt = {
-    id: inboxMessage.id,
-    status: 'steered',
-    runId: activeRun.runId,
-    origin: inboxMessage.origin,
-  } satisfies DeliveryRoutedEvent
-  context.broadcast('deliveryRouted', receipt)
-  return receipt
+
+  {
+    const receipt = {
+      id: inboxMessage.id,
+      status: 'queued',
+      origin: inboxMessage.origin,
+    } satisfies DeliveryRoutedEvent
+    context.broadcast('deliveryRouted', receipt)
+    return receipt
+  }
 }
 
 const cancel: SessionActions['cancel'] = async (context, runId) => {

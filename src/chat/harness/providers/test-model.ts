@@ -28,6 +28,7 @@ const FINAL_REASONING =
   'The simulated tool completed, so I can now produce the final response.'
 const FINAL_TEXT =
   'The test model completed a streamed reasoning, text, and tool-call sequence.'
+const THROW_ON_ABORT_ENV = 'SENSOS_TEST_MODEL_THROW_ON_ABORT'
 
 const usage = {
   inputTokens: {
@@ -138,14 +139,50 @@ export function createTestLanguageModel(
       usage,
       warnings: [],
     }),
-    doStream: async options => ({
-      stream: simulateReadableStream({
+    doStream: async options => {
+      const stream = simulateReadableStream({
         initialDelayInMs: 0,
         chunkDelayInMs,
         chunks: containsToolResult(options.prompt)
           ? finalStepChunks()
           : firstStepChunks(),
-      }),
-    }),
+      })
+      if (
+        process.env[THROW_ON_ABORT_ENV] !== '1' ||
+        !options.abortSignal
+      ) {
+        return { stream }
+      }
+
+      const reader = stream.getReader()
+      let aborted = false
+      let controller:
+        | ReadableStreamDefaultController<StreamPart>
+        | undefined
+      const onAbort = () => {
+        aborted = true
+        controller?.error(new Error('Test model provider aborted'))
+      }
+      return {
+        stream: new ReadableStream<StreamPart>({
+          start(value) {
+            controller = value
+            options.abortSignal?.addEventListener('abort', onAbort, {
+              once: true,
+            })
+          },
+          async pull(value) {
+            const next = await reader.read()
+            if (aborted) return
+            if (next.done) value.close()
+            else value.enqueue(next.value)
+          },
+          async cancel(reason) {
+            options.abortSignal?.removeEventListener('abort', onAbort)
+            await reader.cancel(reason)
+          },
+        }),
+      }
+    },
   })
 }

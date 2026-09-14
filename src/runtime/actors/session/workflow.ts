@@ -8,12 +8,10 @@ import {
   type UIMessageChunk,
   type UIMessageStreamOutcome,
   isToolUIPart,
+  readUIMessageStream,
 } from 'ai'
 import { createHarness, createRunSteeringInput } from '@/chat/harness'
-import {
-  withOriginAttribution,
-  type SteeringMessage,
-} from '@/chat/harness'
+import type { SteeringMessage } from '@/chat/harness'
 import { createProviderOptions } from '@/chat/harness/providers'
 import { createAgentOsSandbox } from '@/chat/agentos-sandbox'
 import { createIdGeneratorWithPrefix, errorMessage } from '@/shared/utils'
@@ -106,29 +104,30 @@ async function routeInboxMessage(
 
     if (shouldSteer && activeRun) {
       const message = messageWithOrigin(inboxMessage)
-      const appended = await appendMessageIfAbsent(
-        step.db,
+      const steeringMessage = {
         message,
-        new Date(inboxMessage.createdAt)
-      )
-      if (appended.created) {
-        const steeringMessage = {
-          message,
+        origin: inboxMessage.origin,
+      }
+      const accepted =
+        inboxMessage.priority === 'now'
+          ? activeRun.interrupt(steeringMessage)
+          : activeRun.steering.push(steeringMessage)
+      if (!accepted) {
+        step.broadcast('deliveryRouted', {
+          id: inboxMessage.id,
+          status: 'refused',
+          reason: 'not_active',
           origin: inboxMessage.origin,
-        }
-        const accepted =
-          inboxMessage.priority === 'now'
-            ? activeRun.interrupt(steeringMessage)
-            : activeRun.steering.push(steeringMessage)
-        if (!accepted) {
-          step.broadcast('deliveryRouted', {
-            id: inboxMessage.id,
-            status: 'refused',
-            reason: 'not_active',
-            origin: inboxMessage.origin,
-          })
-          return
-        }
+        })
+        return
+      }
+
+      if (inboxMessage.priority === 'adaptive') {
+        const appended = await appendMessageIfAbsent(
+          step.db,
+          message,
+          new Date(inboxMessage.createdAt)
+        )
         const messages = await listMessages(step.db)
         await projectTranscript(
           step.state.sessionId,
@@ -248,12 +247,21 @@ function aggregateUsage(steps: RunStepMetadata[]): LanguageModelUsage {
   )
 }
 
-function completedPartsBeforeInterruptedStep(message?: UIMessage) {
-  if (!message) return []
-  const lastStepStart = message.parts.findLastIndex(
-    part => part.type === 'step-start'
-  )
-  return lastStepStart < 0 ? [] : message.parts.slice(0, lastStepStart)
+function hasAssistantContent(message: UIMessage | undefined): boolean {
+  return message?.parts.some(part => part.type !== 'step-start') ?? false
+}
+
+function interruptedAssistantMessage(
+  assistantMessageId: string,
+  responseMessage: UIMessage | undefined
+): UIMessage {
+  if (hasAssistantContent(responseMessage))
+    return responseMessage as UIMessage
+  return {
+    id: assistantMessageId,
+    role: 'assistant',
+    parts: [{ type: 'text', text: '[Interrupted]', state: 'done' }],
+  }
 }
 
 type AcceptedWork = {
@@ -459,21 +467,28 @@ export const runWorkflow: RunWorkflow = async context => {
               }
 
               const abortController = new AbortController()
+              const interruptController = new AbortController()
               const steering = createRunSteeringInput()
-              let sliceAbortController = new AbortController()
               let acceptingInterrupts = true
-              const interruptions: SteeringMessage[] = []
+              let interruptedBy: SteeringMessage | undefined
               step.vars.activeRun = {
                 runId: run.id,
                 abortController,
                 steering,
                 interrupt: message => {
-                  if (!acceptingInterrupts) return false
-                  interruptions.push(message)
-                  sliceAbortController.abort('steered')
+                  if (interruptedBy?.message.id === message.message.id) {
+                    return true
+                  }
+                  if (!acceptingInterrupts || interruptedBy) return false
+                  acceptingInterrupts = false
+                  interruptedBy = message
+                  interruptController.abort('interrupted')
                   return true
                 },
               }
+
+              let responseMessage: UIMessage | undefined
+              let streamedResponseMessage: UIMessage | undefined
 
               try {
                 await updateRun(step.db, run.id, {
@@ -490,137 +505,97 @@ export const runWorkflow: RunWorkflow = async context => {
                   cwd: step.state.config.guestCwd,
                 })
 
-                let sliceMessages = messages
-                let completedAssistantParts: UIMessage['parts'] = []
-                let responseMessage: UIMessage | undefined
                 const stepMetadata: RunStepMetadata[] = []
-                let endState: {
+                const endState: {
                   outcome: UIMessageStreamOutcome
                   finishReason?: FinishReason
                 } = { outcome: { status: 'unknown' } }
 
-                while (true) {
-                  sliceAbortController = new AbortController()
-                  const harness = createHarness({
-                    sandbox,
-                    signal: abortController.signal,
-                    initialMessages: sliceMessages,
-                    model: command.model,
-                    features: step.state.config.features,
-                    instructions: step.state.config.instructions,
-                    providerOptions: createProviderOptions({
-                      gateway: {
-                        byok: {
-                          openai: [],
-                        },
+                const harness = createHarness({
+                  sandbox,
+                  signal: abortController.signal,
+                  initialMessages: messages,
+                  model: command.model,
+                  features: step.state.config.features,
+                  instructions: step.state.config.instructions,
+                  providerOptions: createProviderOptions({
+                    gateway: {
+                      byok: {
+                        openai: [],
                       },
-                    }),
-                    steeringInput: steering,
-                  })
-
-                  endState = { outcome: { status: 'unknown' } }
-                  responseMessage = undefined
-                  const signal = joinSignals(
-                    step.abortSignal,
-                    abortController.signal,
-                    sliceAbortController.signal
-                  )
-                  const stream = await createAgentUIStream({
-                    agent: harness.agent,
-                    uiMessages: harness.initialMessages,
-                    abortSignal: signal,
-                    generateMessageId: () =>
-                      run.assistantMessageId || createMessageId(),
-                    onStepEnd: result => {
-                      stepMetadata.push({
-                        callId: result.callId,
-                        stepNumber: result.stepNumber,
-                        finishReason: result.finishReason,
-                        ...(result.rawFinishReason
-                          ? { rawFinishReason: result.rawFinishReason }
-                          : {}),
-                        usage: result.usage,
-                        ...(result.providerMetadata
-                          ? { providerMetadata: result.providerMetadata }
-                          : {}),
-                        response: {
-                          id: result.response.id,
-                          timestamp:
-                            result.response.timestamp.toISOString(),
-                          modelId: result.response.modelId,
-                        },
-                      })
                     },
-                    sendFinish: false,
-                    onEnd: event => {
-                      responseMessage = event.responseMessage
-                      endState.outcome = event.outcome
-                      endState.finishReason = event.finishReason
-                    },
-                  })
+                  }),
+                  steeringInput: steering,
+                })
 
+                const signal = joinSignals(
+                  step.abortSignal,
+                  abortController.signal,
+                  interruptController.signal
+                )
+                const stream = await createAgentUIStream({
+                  agent: harness.agent,
+                  uiMessages: harness.initialMessages,
+                  abortSignal: signal,
+                  generateMessageId: () =>
+                    run.assistantMessageId || createMessageId(),
+                  onStepEnd: result => {
+                    stepMetadata.push({
+                      callId: result.callId,
+                      stepNumber: result.stepNumber,
+                      finishReason: result.finishReason,
+                      ...(result.rawFinishReason
+                        ? { rawFinishReason: result.rawFinishReason }
+                        : {}),
+                      usage: result.usage,
+                      ...(result.providerMetadata
+                        ? { providerMetadata: result.providerMetadata }
+                        : {}),
+                      response: {
+                        id: result.response.id,
+                        timestamp: result.response.timestamp.toISOString(),
+                        modelId: result.response.modelId,
+                      },
+                    })
+                  },
+                  sendFinish: false,
+                  onEnd: event => {
+                    responseMessage = event.responseMessage
+                    endState.outcome = event.outcome
+                    endState.finishReason = event.finishReason
+                  },
+                })
+
+                let messageStreamController:
+                  | ReadableStreamDefaultController<UIMessageChunk>
+                  | undefined
+                const messageSnapshots = readUIMessageStream({
+                  stream: new ReadableStream<UIMessageChunk>({
+                    start(controller) {
+                      messageStreamController = controller
+                    },
+                  }),
+                })
+                const consumeMessageSnapshots = (async () => {
+                  for await (const snapshot of messageSnapshots) {
+                    streamedResponseMessage = snapshot
+                  }
+                })()
+
+                try {
                   for await (const chunk of stream) {
-                    if (
-                      chunk.type === 'abort' &&
-                      sliceAbortController.signal.aborted &&
-                      !abortController.signal.aborted &&
-                      !step.abortSignal.aborted
-                    ) {
-                      continue
-                    }
-                    await publishFrame(chunk)
+                    messageStreamController?.enqueue(chunk)
+                    if (chunk.type !== 'abort') await publishFrame(chunk)
                   }
-
-                  if (
-                    !sliceAbortController.signal.aborted ||
-                    abortController.signal.aborted ||
-                    step.abortSignal.aborted
-                  ) {
-                    break
-                  }
-
-                  const accepted = interruptions.splice(
-                    0,
-                    interruptions.length
-                  )
-                  completedAssistantParts = [
-                    ...completedAssistantParts,
-                    ...completedPartsBeforeInterruptedStep(
-                      responseMessage
-                    ),
-                  ]
-                  await publishFrame({ type: 'reset-step' })
-                  sliceMessages = [
-                    ...messages,
-                    ...(completedAssistantParts.length > 0
-                      ? [
-                          {
-                            id: `${run.assistantMessageId}-context`,
-                            role: 'assistant' as const,
-                            parts: completedAssistantParts,
-                          },
-                        ]
-                      : []),
-                    ...accepted.map(withOriginAttribution),
-                  ]
+                } finally {
+                  messageStreamController?.close()
+                  await consumeMessageSnapshots
+                }
+                if (hasAssistantContent(streamedResponseMessage)) {
+                  responseMessage = streamedResponseMessage
                 }
 
                 acceptingInterrupts = false
-                const completedResponse = responseMessage as
-                  | UIMessage
-                  | undefined
-                if (
-                  completedResponse &&
-                  completedAssistantParts.length > 0
-                ) {
-                  responseMessage = {
-                    ...completedResponse,
-                    parts: [
-                      ...completedAssistantParts,
-                      ...completedResponse.parts,
-                    ],
-                  }
-                }
 
                 let status:
                   | 'cancelled'
@@ -634,6 +609,7 @@ export const runWorkflow: RunWorkflow = async context => {
                   status = 'cancelled'
                   terminalChunk = { type: 'abort', reason: 'cancelled' }
                 } else if (
+                  interruptedBy ||
                   step.abortSignal.aborted ||
                   endState.outcome.status === 'aborted'
                 ) {
@@ -661,7 +637,14 @@ export const runWorkflow: RunWorkflow = async context => {
                   sequence,
                   chunk: terminalChunk,
                   responseMessage:
-                    status === 'completed' ? responseMessage : undefined,
+                    status === 'completed'
+                      ? responseMessage
+                      : status === 'interrupted'
+                        ? interruptedAssistantMessage(
+                            run.assistantMessageId,
+                            responseMessage
+                          )
+                        : undefined,
                   error: failure,
                   finishReason:
                     status === 'completed'
@@ -679,7 +662,7 @@ export const runWorkflow: RunWorkflow = async context => {
                   seq: sequence,
                   chunk: terminalChunk,
                 })
-                if (status === 'completed') {
+                if (status === 'completed' || status === 'interrupted') {
                   const messages = await listMessages(step.db)
                   await projectTranscript(
                     step.state.sessionId,
@@ -697,7 +680,7 @@ export const runWorkflow: RunWorkflow = async context => {
                 const failure = errorMessage(error)
                 const status = abortController.signal.aborted
                   ? 'cancelled'
-                  : step.abortSignal.aborted
+                  : interruptedBy || step.abortSignal.aborted
                     ? 'interrupted'
                     : 'failed'
                 const chunk: UIMessageChunk =
@@ -709,6 +692,15 @@ export const runWorkflow: RunWorkflow = async context => {
                   status,
                   sequence,
                   chunk,
+                  responseMessage:
+                    status === 'interrupted'
+                      ? interruptedAssistantMessage(
+                          run.assistantMessageId,
+                          hasAssistantContent(streamedResponseMessage)
+                            ? streamedResponseMessage
+                            : responseMessage
+                        )
+                      : undefined,
                   error: status === 'failed' ? failure : undefined,
                 })
                 step.broadcast('frame', {

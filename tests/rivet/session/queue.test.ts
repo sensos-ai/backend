@@ -63,12 +63,19 @@ async function waitForCompletedRun(
 
 test('completable run queue durably creates and deduplicates a run', async () => {
   const previousTestModel = process.env.SENSOS_USE_TEST_MODEL
+  const previousThrowOnAbort = process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT
   process.env.SENSOS_USE_TEST_MODEL = '1'
+  process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT = '1'
   onTestFinished(() => {
     if (previousTestModel === undefined) {
       delete process.env.SENSOS_USE_TEST_MODEL
     } else {
       process.env.SENSOS_USE_TEST_MODEL = previousTestModel
+    }
+    if (previousThrowOnAbort === undefined) {
+      delete process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT
+    } else {
+      process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT = previousThrowOnAbort
     }
   })
 
@@ -148,19 +155,40 @@ test('completable run queue durably creates and deduplicates a run', async () =>
   await firstRunning
   expect(started.runId).toMatch(/^run_/)
 
-  const steering = inbox('now', 'steer this same turn')
-  const interruptedSlice = waitForEvent<FrameEvent>(
+  const partialAssistantOutput = waitForEvent<FrameEvent>(
     listener => connection.on('frame', listener),
     event =>
-      event.runId === started.runId && event.chunk.type === 'reset-step'
+      event.runId === started.runId && event.chunk.type === 'text-delta'
   )
+  await partialAssistantOutput
+
+  const steering = inbox('now', 'interrupt into a new turn')
   const steeredReceipt = waitForEvent<DeliveryRoutedEvent>(
     listener => connection.on('deliveryRouted', listener),
     event => event.id === steering.id && event.status === 'steered'
   )
+  const interrupted = waitForEvent<StatusChangedEvent>(
+    listener => connection.on('statusChanged', listener),
+    event =>
+      event.runId === started.runId && event.runStatus === 'interrupted'
+  )
+  const interruptStarted = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === steering.id && event.status === 'started'
+  )
+  const successorRunning = waitForEvent<StatusChangedEvent>(
+    listener => connection.on('statusChanged', listener),
+    event => event.runId !== started.runId && event.runStatus === 'running'
+  )
   await connection.deliver(steering)
   expect((await steeredReceipt).runId).toBe(started.runId)
-  await interruptedSlice
+  await interrupted
+  const successor = await interruptStarted
+  expect(successor.runId).not.toBe(started.runId)
+
+  if (!successor.runId)
+    throw new Error('Missing interrupt successor run id')
+  expect((await successorRunning).runId).toBe(successor.runId)
 
   const adaptiveSteering = inbox('adaptive', 'adapt this same turn')
   const adaptiveReceipt = waitForEvent<DeliveryRoutedEvent>(
@@ -168,7 +196,7 @@ test('completable run queue durably creates and deduplicates a run', async () =>
     event => event.id === adaptiveSteering.id && event.status === 'steered'
   )
   await connection.deliver(adaptiveSteering)
-  expect((await adaptiveReceipt).runId).toBe(started.runId)
+  expect((await adaptiveReceipt).runId).toBe(successor.runId)
 
   const next = inbox('next', 'run only after the first turn')
   const queuedReceipt = waitForEvent<DeliveryRoutedEvent>(
@@ -187,13 +215,12 @@ test('completable run queue durably creates and deduplicates a run', async () =>
     )
   ).toBe(false)
 
-  if (!started.runId) throw new Error('Missing first run id')
   await waitForCompletedRun(
     runId => connection.getRun(runId),
-    started.runId
+    successor.runId
   )
   const second = await nextStarted
-  expect(second.runId).not.toBe(started.runId)
+  expect(second.runId).not.toBe(successor.runId)
 
   if (!second.runId) throw new Error('Missing second run id')
   await waitForCompletedRun(
@@ -202,10 +229,31 @@ test('completable run queue durably creates and deduplicates a run', async () =>
   )
 
   const messages = (await connection.getSession()).messages
+  if (!started.runId) throw new Error('Missing first run id')
+  const interruptedRun = await connection.getRun(started.runId)
+  if (!interruptedRun) throw new Error('Missing interrupted run')
+  const messageIds = messages.map((message: UIMessage) => message.id)
+  const cutoff = messages.find(
+    (message: UIMessage) =>
+      message.id === interruptedRun.assistantMessageId
+  )
+  expect(
+    cutoff?.parts.some(
+      (part: UIMessage['parts'][number]) =>
+        (part.type === 'text' || part.type === 'reasoning') &&
+        part.text.length > 0
+    )
+  ).toBe(true)
+  expect(
+    messageIds.indexOf(interruptedRun.assistantMessageId)
+  ).toBeGreaterThan(messageIds.indexOf(initialDelivery.id))
+  expect(messageIds.indexOf(steering.id)).toBeGreaterThan(
+    messageIds.indexOf(interruptedRun.assistantMessageId)
+  )
   expect(
     messages.filter((message: UIMessage) => message.id === next.id)
   ).toHaveLength(1)
-  expect(messages.map((message: UIMessage) => message.id)).toEqual(
+  expect(messageIds).toEqual(
     expect.arrayContaining([
       initialDelivery.id,
       steering.id,
