@@ -262,7 +262,18 @@ async function runChat(
                 })
                 .catch(() => undefined)
             }
-            unsubscribe = nextConnection.on('titleChanged', rehydrate)
+            const unsubscribeTitle = nextConnection.on(
+              'titleChanged',
+              rehydrate
+            )
+            const unsubscribeMessages = nextConnection.on(
+              'messagesChanged',
+              rehydrate
+            )
+            unsubscribe = () => {
+              unsubscribeTitle()
+              unsubscribeMessages()
+            }
             rehydrate()
           })
           .catch(() => undefined)
@@ -282,6 +293,22 @@ async function runChat(
       tools: 'auto-collapsed',
       responseStatistics: 'outputTokensPerSecond',
       commands: [
+        {
+          name: '/interrupt',
+          description: 'Steer the active run now: /interrupt <message>',
+          run: argument =>
+            argument
+              ? { prompt: argument, priority: 'now' as const }
+              : undefined,
+        },
+        {
+          name: '/queue',
+          description: 'Queue the next turn: /queue <message>',
+          run: argument =>
+            argument
+              ? { prompt: argument, priority: 'next' as const }
+              : undefined,
+        },
         {
           name: '/model',
           description: 'Choose the model for subsequent messages',

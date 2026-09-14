@@ -19,7 +19,10 @@ import {
   type HarnessFeatures,
 } from '@/chat/harness'
 import type { SessionQueues, SessionEvents } from './config'
+import type { InboxMessage } from './config'
 import type { SessionDatabaseProvider } from './db'
+import type { createRunSteeringInput } from '@/chat/harness'
+import type { SteeringMessage } from '@/chat/harness'
 
 const gatewayModelSchema = z.custom<GatewayModelId>(
   value => typeof value === 'string'
@@ -65,7 +68,12 @@ export type ConnectionState = {
 
 export type Vars = {
   vm: AgentOs
-  activeRun?: { runId: string; abortController: AbortController }
+  activeRun?: {
+    runId: string
+    abortController: AbortController
+    steering: ReturnType<typeof createRunSteeringInput>
+    interrupt: (message: SteeringMessage) => boolean
+  }
 }
 
 export type SessionActionContext = ActionContext<
@@ -86,6 +94,7 @@ export type SessionAction<Args extends any[] = any[]> = (
 
 export type SessionActions = {
   cancel: SessionAction<[runId: string]>
+  deliver: SessionAction<[message: InboxMessage]>
   deleteSession: SessionAction
   getSession: SessionAction
   setModel: SessionAction<[model: GatewayModelId]>

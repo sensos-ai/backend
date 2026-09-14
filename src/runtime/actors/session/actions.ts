@@ -1,5 +1,6 @@
 import {
   deleteSessionData,
+  appendMessageIfAbsent,
   getRun as getRunFromDB,
   getSessionMeta,
   listMessages,
@@ -10,6 +11,103 @@ import {
 import { toChatStatus } from './config'
 import type { SessionActions } from './types'
 import { configuredSessionCatalog } from '@/storage/session-catalog'
+import { isToolUIPart, type UIMessage } from 'ai'
+import type { DeliveryRoutedEvent } from './config'
+
+function isWaitingForHumanInput(messages: UIMessage[]): boolean {
+  const latest = messages.at(-1)
+  return (
+    latest?.role === 'assistant' &&
+    latest.parts.some(
+      part =>
+        isToolUIPart(part) &&
+        part.state === 'approval-requested' &&
+        part.approval.isAutomatic !== true
+    )
+  )
+}
+
+const deliver: SessionActions['deliver'] = async (
+  context,
+  inboxMessage
+) => {
+  const activeRun = context.vars.activeRun
+  const shouldSteer =
+    inboxMessage.priority === 'now' ||
+    (inboxMessage.priority === 'adaptive' && activeRun !== undefined)
+
+  if (
+    inboxMessage.priority === 'now' &&
+    !activeRun &&
+    isWaitingForHumanInput(await listMessages(context.db))
+  ) {
+    const receipt = {
+      id: inboxMessage.id,
+      status: 'refused',
+      reason: 'waiting_for_input',
+      origin: inboxMessage.origin,
+    } satisfies DeliveryRoutedEvent
+    context.broadcast('deliveryRouted', receipt)
+    return receipt
+  }
+
+  await context.queue.send('inbox', inboxMessage)
+  if (!shouldSteer || !activeRun) {
+    const receipt = {
+      id: inboxMessage.id,
+      status: 'queued',
+      origin: inboxMessage.origin,
+    } satisfies DeliveryRoutedEvent
+    context.broadcast('deliveryRouted', receipt)
+    return receipt
+  }
+
+  const message = {
+    ...inboxMessage.message,
+    metadata: {
+      ...(inboxMessage.message.metadata &&
+      typeof inboxMessage.message.metadata === 'object'
+        ? inboxMessage.message.metadata
+        : {}),
+      sensosOrigin: inboxMessage.origin,
+    },
+  }
+  const appended = await appendMessageIfAbsent(
+    context.db,
+    message,
+    new Date(inboxMessage.createdAt)
+  )
+  if (appended.created) {
+    const steeringMessage = { message, origin: inboxMessage.origin }
+    const accepted =
+      inboxMessage.priority === 'now'
+        ? activeRun.interrupt(steeringMessage)
+        : activeRun.steering.push(steeringMessage)
+    if (!accepted) {
+      const receipt = {
+        id: inboxMessage.id,
+        status: 'refused',
+        reason: 'not_active',
+        origin: inboxMessage.origin,
+      } satisfies DeliveryRoutedEvent
+      context.broadcast('deliveryRouted', receipt)
+      return receipt
+    }
+    const messages = await listMessages(context.db)
+    context.broadcast('messagesChanged', {
+      messages,
+      revision: appended.revision,
+    })
+  }
+  const receipt = {
+    id: inboxMessage.id,
+    status: 'steered',
+    runId: activeRun.runId,
+    origin: inboxMessage.origin,
+  } satisfies DeliveryRoutedEvent
+  context.broadcast('deliveryRouted', receipt)
+  return receipt
+}
 
 const cancel: SessionActions['cancel'] = async (context, runId) => {
   const run = await requestRunCancellation(context.db, runId)
@@ -105,6 +203,7 @@ const deleteSession: SessionActions['deleteSession'] = async context => {
 
 export default {
   cancel,
+  deliver,
   deleteSession,
   getRun,
   getSession,

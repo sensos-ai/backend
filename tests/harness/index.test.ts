@@ -1,6 +1,10 @@
-import { describe, expect, test } from 'bun:test'
-import type { UIMessage } from 'ai'
-import { createHarness } from '@/chat/harness'
+import { describe, expect, onTestFinished, test } from 'bun:test'
+import { createAgentUIStream, type UIMessage } from 'ai'
+import {
+  appendSteeringMessages,
+  createHarness,
+  type SteeringMessage,
+} from '@/chat/harness'
 
 describe('createHarness', () => {
   test('accepts and exposes initial messages', () => {
@@ -50,5 +54,89 @@ describe('createHarness', () => {
     })
 
     expect(harness.features).toEqual({ useMockModel: false })
+  })
+
+  test('drains active-run steering at the next test-model prepareStep boundary', async () => {
+    const previous = process.env.SENSOS_USE_TEST_MODEL
+    process.env.SENSOS_USE_TEST_MODEL = '1'
+    onTestFinished(() => {
+      if (previous === undefined) delete process.env.SENSOS_USE_TEST_MODEL
+      else process.env.SENSOS_USE_TEST_MODEL = previous
+    })
+
+    let prepareSteps = 0
+    const steeringMessage: SteeringMessage = {
+      message: {
+        id: 'msg_steer',
+        role: 'user',
+        parts: [{ type: 'text', text: 'change course now' }],
+      },
+      origin: { type: 'session', sessionId: 'session_peer' },
+    }
+    const harness = createHarness({
+      sandbox: {
+        id: 'sandbox_test',
+        provider: 'agentos',
+        cwd: '/workspace',
+        run: async () => ({
+          exitCode: 0,
+          stdout: '/workspace',
+          stderr: '',
+        }),
+        files: {},
+      } as never,
+      signal: new AbortController().signal,
+      initialMessages: [
+        {
+          id: 'msg_initial',
+          role: 'user',
+          parts: [{ type: 'text', text: 'start a tool loop' }],
+        },
+      ],
+      steeringInput: {
+        drain() {
+          prepareSteps += 1
+          return prepareSteps === 2 ? [steeringMessage] : []
+        },
+      },
+    })
+
+    const stream = await createAgentUIStream({
+      agent: harness.agent,
+      uiMessages: harness.initialMessages,
+    })
+    for await (const _chunk of stream) {
+      // Consume the deterministic two-step test-model run.
+    }
+
+    expect(prepareSteps).toBe(2)
+  })
+
+  test('adds origin attribution only to drained steering model input', async () => {
+    const appended = await appendSteeringMessages(
+      [{ role: 'user', content: 'original' }],
+      {
+        drain: () => [
+          {
+            message: {
+              id: 'msg_peer',
+              role: 'user',
+              parts: [{ type: 'text', text: 'peer update' }],
+            },
+            origin: { type: 'session', sessionId: 'session_peer' },
+          },
+        ],
+      }
+    )
+
+    expect(appended).toEqual([
+      { role: 'user', content: 'original' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '[Session session_peer]\npeer update' },
+        ],
+      },
+    ])
   })
 })

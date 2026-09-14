@@ -9,6 +9,7 @@ import { createQueue } from './queue'
 import type { RunStatus } from './db'
 import { toChatStatus } from './utils/status'
 import { z } from 'zod'
+import type { MessageOrigin } from '@/chat/harness'
 
 export type QueueTypeToken<
   TMessage,
@@ -25,6 +26,28 @@ const runCommandSchema = z.object({
 })
 
 export type RunCommand = z.input<typeof runCommandSchema>
+
+const inboxMessageSchema = z.object({
+  id: z.string(),
+  priority: z.enum(['now', 'next', 'adaptive']),
+  message: z.custom<UIMessage>(),
+  createdAt: z.number(),
+  origin: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('client'), clientId: z.string() }),
+    z.object({ type: z.literal('session'), sessionId: z.string() }),
+    z.object({ type: z.literal('system') }),
+  ]),
+})
+
+export type InboxMessage = z.input<typeof inboxMessageSchema>
+
+export type DeliveryRoutedEvent = {
+  id: string
+  status: 'queued' | 'started' | 'steered' | 'refused'
+  runId?: string
+  reason?: 'waiting_for_input' | 'session_busy' | 'not_active'
+  origin: MessageOrigin
+}
 
 const runCompletionSchema = z.object({
   accepted: z.boolean(),
@@ -55,6 +78,7 @@ export type StatusChangedEvent = {
 
 export const queues = {
   runs: createQueue(runCommandSchema, runCompletionSchema),
+  inbox: createQueue(inboxMessageSchema),
 }
 
 export const events = {
@@ -62,6 +86,7 @@ export const events = {
   statusChanged: event<StatusChangedEvent>(),
   messagesChanged: event<{ messages: UIMessage[]; revision: number }>(),
   titleChanged: event<{ title: string }>(),
+  deliveryRouted: event<DeliveryRoutedEvent>(),
 }
 
 export type SessionQueues = typeof queues

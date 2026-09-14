@@ -65,6 +65,13 @@ describe('AgentTUIRunner history hydration', () => {
   })
 
   test('accepts input while actor hydration is pending and then reconciles history', async () => {
+    let applyUpdate:
+      | ((snapshot: {
+          messages: UIMessage[]
+          revision: number
+          title?: string
+        }) => void)
+      | undefined
     let resolveHydration:
       | ((value: {
           messages: UIMessage[]
@@ -112,6 +119,9 @@ describe('AgentTUIRunner history hydration', () => {
       chatId: 'chat_existing',
       initialMessages: restoredMessages.slice(0, 1),
       hydration,
+      hydrationUpdates: apply => {
+        applyUpdate = apply
+      },
       renderer,
       transport,
     }).run()
@@ -128,6 +138,15 @@ describe('AgentTUIRunner history hydration', () => {
 
     expect(statuses).toEqual(['waking', 'ready'])
     expect(renders.at(-1)).toEqual(restoredMessages)
+
+    applyUpdate?.({
+      messages: restoredMessages,
+      revision: 3,
+      title: 'Hydrated chat',
+    })
+    await Promise.resolve()
+
+    expect(statuses).toEqual(['waking', 'ready'])
     resolvePrompt?.(undefined)
     await running
   })

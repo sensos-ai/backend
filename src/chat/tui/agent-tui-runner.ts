@@ -7,7 +7,12 @@ import type {
   TerminalPartDisplayMode,
 } from './run-agent-tui'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
-import { findSlashCommand, type SlashCommand } from './commands'
+import {
+  findSlashCommand,
+  slashCommandArgument,
+  type DeliveryPriority,
+  type SlashCommand,
+} from './commands'
 import {
   TerminalRenderer,
   type TerminalInput,
@@ -53,6 +58,10 @@ export type AgentTUISessionOptions = {
   responseStatistics?: ResponseStatisticsMode
   contextSize?: number
   commands?: readonly SlashCommand[]
+  onSubmitDuringStream?: (
+    prompt: string,
+    priority: DeliveryPriority
+  ) => Promise<void>
 }
 
 export type AgentTUIToolApprovalRequest = {
@@ -157,6 +166,7 @@ export class AgentTUIRunner {
     let prompt: string | undefined = this.initialPrompt
     let hasRunTurn = false
     let streamWithoutPrompt = false
+    let deliveryPriority: DeliveryPriority = 'adaptive'
     let active = true
     let rendererSuspended = false
     let pendingHydration: AgentTUIHydration | undefined
@@ -186,7 +196,6 @@ export class AgentTUIRunner {
         responseStatistics: this.responseStatistics,
         contextSize: this.contextSize,
       })
-      this.renderer.setAgentConnectionStatus?.('ready')
     }
 
     await this.renderer.renderMessages?.([...messages], {
@@ -201,6 +210,7 @@ export class AgentTUIRunner {
       void this.hydration.then(
         snapshot => {
           if (!active) return
+          this.renderer.setAgentConnectionStatus?.('ready')
           if (rendererSuspended) pendingHydration = snapshot
           else applyHydration(snapshot)
         },
@@ -259,12 +269,17 @@ export class AgentTUIRunner {
               this.renderer.suspend?.()
               let result: Awaited<ReturnType<typeof command.run>>
               try {
-                result = await command.run()
+                result = await command.run(slashCommandArgument(prompt))
               } finally {
                 rendererSuspended = false
                 if (pendingHydration) applyHydration(pendingHydration)
               }
               if (result === 'exit') return
+              if (result && typeof result === 'object') {
+                prompt = result.prompt
+                deliveryPriority = result.priority
+                continue
+              }
               prompt = undefined
               continue
             }
@@ -276,8 +291,10 @@ export class AgentTUIRunner {
 
         const result = await this.streamMessages(
           [...messages],
-          generateMessageId
+          generateMessageId,
+          deliveryPriority
         )
+        deliveryPriority = 'adaptive'
 
         try {
           const responseMessage = await this.renderer.renderStream(
@@ -291,6 +308,33 @@ export class AgentTUIRunner {
               responseStatistics: this.responseStatistics,
               contextSize: this.contextSize,
               waitForExit: false,
+              onSubmitDuringStream: this.transport
+                ? async (nextPrompt, priority) => {
+                    const transport = this
+                      .transport as ChatTransport<UIMessage> & {
+                      deliverMessage?: (
+                        message: UIMessage,
+                        priority: DeliveryPriority
+                      ) => Promise<{ status: string; reason?: string }>
+                    }
+                    if (!transport.deliverMessage) {
+                      throw new Error(
+                        'This chat transport does not support active-run delivery'
+                      )
+                    }
+                    const delivery = await transport.deliverMessage(
+                      createUserMessage(generateMessageId(), nextPrompt),
+                      priority
+                    )
+                    if (delivery.status === 'refused') {
+                      throw new Error(
+                        delivery.reason === 'waiting_for_input'
+                          ? 'Immediate steering is unavailable while waiting for input'
+                          : 'The session refused the message'
+                      )
+                    }
+                  }
+                : undefined,
             }
           )
 
@@ -353,12 +397,14 @@ export class AgentTUIRunner {
 
   private async streamMessages(
     messages: UIMessage[],
-    generateMessageId: () => string
+    generateMessageId: () => string,
+    priority: DeliveryPriority = 'adaptive'
   ): Promise<AgentTUIStreamResult> {
     const abortController = new AbortController()
     const abort = () => abortController.abort()
 
     if (this.transport) {
+      const requestOptions = this.requestOptions?.()
       return {
         uiMessageStream: await this.transport.sendMessages({
           trigger: 'submit-message',
@@ -366,7 +412,11 @@ export class AgentTUIRunner {
           messageId: undefined,
           messages,
           abortSignal: abortController.signal,
-          ...this.requestOptions?.(),
+          ...requestOptions,
+          body: {
+            ...(requestOptions?.body ?? {}),
+            priority,
+          },
         }),
         message: lastAssistantMessage(messages),
         abort,

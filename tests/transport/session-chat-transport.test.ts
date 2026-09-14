@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import type {
+  DeliveryRoutedEvent,
   FrameEvent,
   StatusChangedEvent,
 } from '@/runtime/actors/session/config'
@@ -44,6 +45,7 @@ function run(status: RunStatus, error: string | null = null): RunRow {
 class FakeConnection {
   frameListeners = new Set<(event: FrameEvent) => void>()
   statusListeners = new Set<(event: StatusChangedEvent) => void>()
+  deliveryListeners = new Set<(event: DeliveryRoutedEvent) => void>()
   cancelled: string[] = []
   sent: unknown[] = []
   activeRunId: string | undefined
@@ -64,22 +66,56 @@ class FakeConnection {
   })
 
   on(
-    event: 'frame' | 'statusChanged',
+    event: 'frame' | 'statusChanged' | 'deliveryRouted',
     callback:
       | ((event: FrameEvent) => void)
       | ((event: StatusChangedEvent) => void)
+      | ((event: DeliveryRoutedEvent) => void)
   ) {
     const listeners =
-      event === 'frame' ? this.frameListeners : this.statusListeners
+      event === 'frame'
+        ? this.frameListeners
+        : event === 'statusChanged'
+          ? this.statusListeners
+          : this.deliveryListeners
     listeners.add(callback as never)
     return () => listeners.delete(callback as never)
   }
 
   async send(name: string, input: unknown, options: unknown) {
     this.sent.push({ name, input, options })
+    if (name === 'inbox') {
+      const result = await this.sendImplementation()
+      const inbox = input as {
+        id: string
+        origin: DeliveryRoutedEvent['origin']
+      }
+      queueMicrotask(() =>
+        this.emitDelivery({
+          id: inbox.id,
+          status: result.accepted ? 'started' : 'refused',
+          runId: result.runId,
+          origin: inbox.origin,
+        })
+      )
+      return { status: 'accepted' as const }
+    }
     return {
       status: 'completed' as const,
       response: await this.sendImplementation(),
+    }
+  }
+
+  async deliver(input: unknown) {
+    await this.send('inbox', input, undefined)
+    const inbox = input as {
+      id: string
+      origin: DeliveryRoutedEvent['origin']
+    }
+    return {
+      id: inbox.id,
+      status: 'queued' as const,
+      origin: inbox.origin,
     }
   }
 
@@ -113,6 +149,10 @@ class FakeConnection {
 
   emitStatus(event: StatusChangedEvent) {
     for (const listener of this.statusListeners) listener(event)
+  }
+
+  emitDelivery(event: DeliveryRoutedEvent) {
+    for (const listener of this.deliveryListeners) listener(event)
   }
 }
 
@@ -167,17 +207,15 @@ describe('SessionChatTransport', () => {
     expect(await chunks(stream)).toEqual([finishChunk])
     expect(fake.sent).toEqual([
       {
-        name: 'runs',
+        name: 'inbox',
         input: {
-          idempotencyId: 'request-requested',
-          model: 'openai/gpt-6-astra',
+          id: 'request-requested',
+          priority: 'adaptive',
           message: userMessage,
+          createdAt: expect.any(Number),
+          origin: { type: 'client', clientId: 'chat-client' },
         },
-        options: {
-          wait: true,
-          timeout: 10_000,
-          signal: undefined,
-        },
+        options: undefined,
       },
     ])
   })

@@ -8,7 +8,9 @@ import type { ActorConn } from 'rivetkit/client'
 import type { HarnessFeatures } from '@/chat/harness'
 import type { RunRow } from '@/runtime/actors/session/db'
 import type {
+  DeliveryRoutedEvent,
   FrameEvent,
+  InboxMessage,
   RunCommand,
   RunCompletion,
   StatusChangedEvent,
@@ -44,6 +46,8 @@ type SessionTransportConnection = {
     status: 'completed' | 'timedOut'
     response?: RunCompletion
   }>
+  send(name: 'inbox', input: InboxMessage): Promise<unknown>
+  deliver(input: InboxMessage): Promise<DeliveryRoutedEvent>
   cancel(runId: string): Promise<{ cancelled: boolean; runId: string }>
   getSession(): Promise<SessionSnapshot>
   streamSnapshot(runId: string, afterSeq?: number): Promise<RunSnapshot>
@@ -55,6 +59,10 @@ type SessionTransportConnection = {
   on(
     event: 'titleChanged',
     callback: (event: { title: string }) => void
+  ): () => void
+  on(
+    event: 'deliveryRouted',
+    callback: (event: DeliveryRoutedEvent) => void
   ): () => void
 }
 
@@ -74,6 +82,7 @@ const createIdempotencyId = createIdGeneratorWithPrefix('request')
 type SessionChatRequestBody = {
   idempotencyId?: string
   model?: GatewayModelId
+  priority?: InboxMessage['priority']
 }
 
 function requestBody(body: object | undefined): SessionChatRequestBody {
@@ -227,9 +236,76 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   implements ChatTransport<UI_MESSAGE>
 {
   readonly #connection: SessionTransportConnection
+  readonly #clientId: string
 
-  constructor(connection: SessionConnection) {
+  constructor(
+    connection: SessionConnection,
+    options: { clientId?: string } = {}
+  ) {
     this.#connection = connection
+    this.#clientId = options.clientId ?? 'chat-client'
+  }
+
+  async deliverMessage(
+    message: UIMessage,
+    priority: InboxMessage['priority'] = 'adaptive',
+    options: {
+      id?: string
+      signal?: AbortSignal
+      waitForStart?: boolean
+    } = {}
+  ): Promise<DeliveryRoutedEvent> {
+    const id = options.id ?? createIdempotencyId()
+    let cleanup = () => {}
+    const receipt = new Promise<DeliveryRoutedEvent>((resolve, reject) => {
+      let settled = false
+      const finish = (result: DeliveryRoutedEvent) => {
+        if (
+          settled ||
+          (options.waitForStart && result.status === 'queued')
+        ) {
+          return
+        }
+        settled = true
+        cleanup()
+        resolve(result)
+      }
+      const fail = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
+      const unsubscribe = this.#connection.on('deliveryRouted', result => {
+        if (result.id === id) finish(result)
+      })
+      const timer = setTimeout(
+        () => fail(new Error('Timed out waiting for inbox routing')),
+        10_000
+      )
+      const onAbort = () => fail(new Error('Inbox delivery aborted'))
+      cleanup = () => {
+        clearTimeout(timer)
+        unsubscribe()
+        options.signal?.removeEventListener('abort', onAbort)
+      }
+      options.signal?.addEventListener('abort', onAbort, { once: true })
+      if (options.signal?.aborted) onAbort()
+    })
+
+    try {
+      await this.#connection.deliver({
+        id,
+        priority,
+        message,
+        createdAt: Date.now(),
+        origin: { type: 'client', clientId: this.#clientId },
+      })
+    } catch (error) {
+      cleanup()
+      throw error
+    }
+    return receipt
   }
 
   async sendMessages({
@@ -258,27 +334,23 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
 
     try {
       const request = requestBody(body)
-      const queued = await this.#connection.send(
-        'runs',
+      const result = await this.deliverMessage(
+        getFinalUserMessage(messages),
+        request.priority ?? 'adaptive',
         {
-          idempotencyId: request.idempotencyId ?? createIdempotencyId(),
-          model:
-            request.model ?? (await this.#connection.getSession()).model,
-          message: getFinalUserMessage(messages),
-        },
-        { wait: true, timeout: 10_000, signal: abortSignal }
+          id: request.idempotencyId,
+          waitForStart: true,
+        }
       )
-      if (queued.status === 'timedOut' || !queued.response) {
-        throw new Error('Timed out waiting for session run submission')
+      if (result.status === 'refused' || !result.runId) {
+        throw new Error(
+          result.reason === 'waiting_for_input'
+            ? 'Immediate steering is unavailable while the session is waiting for input'
+            : 'Inbox message did not start a run'
+        )
       }
-      const result = queued.response
       runId = result.runId
       bridge.setRunId(runId)
-
-      if (!result.accepted) {
-        bridge.fail(new Error('Session already has an active run'))
-        return bridge.stream
-      }
 
       if (aborted) await this.#connection.cancel(runId)
       bridge.replay(await this.#connection.streamSnapshot(runId, -1))
@@ -340,6 +412,18 @@ export class DeferredSessionChatTransport<
     options: Parameters<ChatTransport<UI_MESSAGE>['sendMessages']>[0]
   ): Promise<ReadableStream<UIMessageChunk>> {
     return (await this.#transport).sendMessages(options)
+  }
+
+  async deliverMessage(
+    message: UIMessage,
+    priority: InboxMessage['priority'] = 'adaptive',
+    options?: Parameters<SessionChatTransport['deliverMessage']>[2]
+  ) {
+    return (await this.#transport).deliverMessage(
+      message,
+      priority,
+      options
+    )
   }
 
   async reconnectToStream(

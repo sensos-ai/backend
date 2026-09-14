@@ -16,6 +16,10 @@ import { resolveHarnessFeatures, type HarnessFeatures } from './features'
 import type { Sandbox } from './sandbox'
 import { sandboxTools } from './tools/sandbox'
 import { startAIEventLogListener } from '@/shared/events'
+import {
+  appendSteeringMessages,
+  type HarnessSteeringInput,
+} from './steering'
 
 startAIEventLogListener()
 
@@ -28,6 +32,7 @@ export interface CreateHarnessOptions {
   maxSteps?: number
   features?: HarnessFeatures
   providerOptions?: ProviderOptions
+  steeringInput?: HarnessSteeringInput
 }
 
 export function createHarness(options: CreateHarnessOptions) {
@@ -57,6 +62,15 @@ export function createHarness(options: CreateHarnessOptions) {
       bash: toolsContext,
     },
     providerOptions: createProviderOptions(options.providerOptions),
+    prepareStep: options.steeringInput
+      ? async ({ messages }) => ({
+          messages:
+            (await appendSteeringMessages(
+              messages,
+              options.steeringInput as HarnessSteeringInput
+            )) ?? messages,
+        })
+      : undefined,
     stopWhen: stepCountIs(options.maxSteps ?? 20),
   })
 
@@ -69,5 +83,6 @@ export function createHarness(options: CreateHarnessOptions) {
 }
 
 export * from './features'
+export * from './steering'
 
 export type Harness = ReturnType<typeof createHarness>

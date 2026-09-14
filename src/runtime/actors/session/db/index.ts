@@ -3,6 +3,7 @@ export type { SessionDatabase, SessionDatabaseProvider } from './database'
 export {
   appendRunFrame,
   appendMessage,
+  appendMessageIfAbsent,
   deleteSessionData,
   ensureSessionMeta,
   finalizeRun,
@@ -10,6 +11,7 @@ export {
   getRunByIdempotencyId,
   getSessionMeta,
   listMessages,
+  messageExists,
   listRunFrames,
   listRuns,
   replaceMessages,

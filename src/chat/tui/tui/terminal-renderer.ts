@@ -9,7 +9,12 @@ import type {
   ResponseStatisticsMode,
   TerminalPartDisplayMode,
 } from '../run-agent-tui'
-import { matchingSlashCommands, type SlashCommand } from '../commands'
+import {
+  matchingSlashCommands,
+  parseStreamingDelivery,
+  type DeliveryPriority,
+  type SlashCommand,
+} from '../commands'
 import {
   renderScreenViewport,
   sliceVisible,
@@ -61,6 +66,10 @@ export type TerminalRendererOptions = {
   responseStatistics?: ResponseStatisticsMode
   contextSize?: number
   commands?: readonly SlashCommand[]
+  onSubmitDuringStream?: (
+    prompt: string,
+    priority: DeliveryPriority
+  ) => Promise<void>
 }
 
 export type TerminalSessionOptions = {
@@ -74,6 +83,10 @@ export type TerminalSessionOptions = {
   responseStatistics?: ResponseStatisticsMode
   contextSize?: number
   commands?: readonly SlashCommand[]
+  onSubmitDuringStream?: (
+    prompt: string,
+    priority: DeliveryPriority
+  ) => Promise<void>
 }
 
 export type TerminalKey =
@@ -202,6 +215,7 @@ export class TerminalRenderer {
   #onData?: (chunk: Buffer) => void
   #onResize?: () => void
   #resolveStreamInterrupt?: () => void
+  #streamSubmissionPending = false
   #commands: readonly SlashCommand[] = []
   #connectionStatus?: string
   #connectionSpinnerTimer?: ReturnType<typeof setInterval>
@@ -367,7 +381,8 @@ export class TerminalRenderer {
     options?: TerminalSessionOptions
   ): Promise<UIMessage | undefined> {
     this.#start(options)
-    this.#inputActive = false
+    this.#inputActive = Boolean(options?.onSubmitDuringStream)
+    this.#inputText = ''
     this.#status = processingStatus
     this.#addSubmittedPrompt(options?.submittedPrompt)
     this.#interrupted = false
@@ -384,7 +399,7 @@ export class TerminalRenderer {
     const streamInterrupted = new Promise<void>(resolve => {
       this.#resolveStreamInterrupt = resolve
     })
-    this.#onData = chunk => this.#handleStreamingKey(chunk)
+    this.#onData = chunk => this.#handleStreamingKey(chunk, options)
     this.#attachInput()
     let responseMessage: UIMessage | undefined
     const stream = toReadableStream(
@@ -562,10 +577,69 @@ export class TerminalRenderer {
     }
   }
 
-  #handleStreamingKey(chunk: Buffer) {
+  #handleStreamingKey(chunk: Buffer, options?: TerminalSessionOptions) {
     const key = parseKey(chunk)
 
     switch (key.type) {
+      case 'character':
+        if (
+          options?.onSubmitDuringStream &&
+          !this.#streamSubmissionPending
+        ) {
+          this.#inputText += key.value
+          this.#showInputCursor()
+          this.#paint()
+        }
+        break
+      case 'backspace':
+        if (
+          options?.onSubmitDuringStream &&
+          !this.#streamSubmissionPending
+        ) {
+          this.#inputText = this.#inputText.slice(0, -1)
+          this.#showInputCursor()
+          this.#paint()
+        }
+        break
+      case 'enter': {
+        if (
+          !options?.onSubmitDuringStream ||
+          this.#streamSubmissionPending ||
+          !this.#inputText.trim()
+        ) {
+          break
+        }
+        let delivery: ReturnType<typeof parseStreamingDelivery>
+        try {
+          delivery = parseStreamingDelivery(this.#inputText)
+        } catch (error) {
+          this.#addErrorSection('Delivery', formatStreamError(error))
+          this.#inputText = ''
+          this.#paint()
+          break
+        }
+        this.#streamSubmissionPending = true
+        this.#inputText = ''
+        this.#status = 'Delivering message...'
+        this.#paint()
+        void options
+          .onSubmitDuringStream(delivery.prompt, delivery.priority)
+          .then(
+            () => {
+              this.#addUserSection(delivery.prompt)
+              this.#status = streamingStatus
+            },
+            error => {
+              this.#addErrorSection('Delivery', formatStreamError(error))
+              this.#status = streamingStatus
+            }
+          )
+          .finally(() => {
+            this.#streamSubmissionPending = false
+            this.#paint()
+          })
+        break
+      }
       case 'up':
       case 'down':
         this.#handleScroll(key.type)
