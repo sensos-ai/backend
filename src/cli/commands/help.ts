@@ -30,6 +30,7 @@ Providers:
   login [${authKeyUsage}]        Sign in to a model provider
   logout [${authKeyUsage}]       Sign out of a model provider
   provider <gateway|codex>    Choose the active model provider
+  provider info               Show the active provider account
 
 Runtime:
   runtime status|stop

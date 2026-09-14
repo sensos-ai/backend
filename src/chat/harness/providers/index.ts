@@ -172,4 +172,5 @@ export {
   SensosHarnessProvider,
   type HarnessAuth,
   type HarnessModel,
+  type HarnessUser,
 } from './harness-provider'

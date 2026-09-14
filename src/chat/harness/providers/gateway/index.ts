@@ -15,6 +15,7 @@ import {
 import {
   beginVercelLogin,
   completeVercelLogin,
+  getVercelUser,
   listVercelTeams,
 } from '@/auth/oauth/vercel'
 
@@ -88,6 +89,7 @@ export function createGatewayHarnessProvider(
   dependencies: {
     config?: GatewayProviderSettings
     provider?: GatewayProvider
+    fetch?: typeof fetch
   } = {}
 ) {
   const provider =
@@ -140,6 +142,7 @@ export function createGatewayHarnessProvider(
         return { ...oauthCredential, teamId }
       },
       token: value => Promise.resolve(value.accessToken),
+      user: value => getVercelUser(value, dependencies.fetch),
     },
   })
 }

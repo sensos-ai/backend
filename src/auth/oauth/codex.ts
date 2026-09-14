@@ -12,6 +12,67 @@ export type CodexOAuthCredential = {
   accountId: string
 }
 
+export type CodexUser = {
+  name: string
+  email: string
+  affiliation?: {
+    kind: 'organization'
+    name: string
+  }
+}
+
+export type CodexAuthFetch = (
+  input: string | URL | Request,
+  init?: RequestInit
+) => Promise<Response>
+
+export async function getCodexUser(
+  credential: CodexOAuthCredential,
+  fetchImpl: CodexAuthFetch = fetch
+): Promise<CodexUser> {
+  const response = await fetchImpl('https://chatgpt.com/backend-api/me', {
+    headers: {
+      Authorization: `Bearer ${credential.accessToken}`,
+      'chatgpt-account-id': credential.accountId,
+    },
+  })
+  const value = (await response.json()) as {
+    name?: unknown
+    email?: unknown
+    orgs?: {
+      data?: Array<{
+        title?: unknown
+        name?: unknown
+        is_default?: unknown
+      }>
+    }
+  }
+  if (
+    !response.ok ||
+    typeof value.name !== 'string' ||
+    typeof value.email !== 'string'
+  ) {
+    throw new Error(`Could not load Codex user (${response.status}).`)
+  }
+  const organizations = value.orgs?.data ?? []
+  const organization =
+    organizations.find(candidate => candidate.is_default === true) ??
+    organizations[0]
+  const organizationName = organization?.title ?? organization?.name
+  return {
+    name: value.name,
+    email: value.email,
+    ...(typeof organizationName === 'string'
+      ? {
+          affiliation: {
+            kind: 'organization' as const,
+            name: organizationName,
+          },
+        }
+      : {}),
+  }
+}
+
 function accountId(accessToken: string): string {
   const payload = accessToken.split('.')[1]
   if (!payload)

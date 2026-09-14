@@ -26,6 +26,7 @@ import {
   harnessAuthKeys,
   listModelsForActiveProvider,
   type HarnessAuthKey,
+  type HarnessUser,
   modelRefForProvider,
   type ModelRef,
   type ModelProvider,
@@ -183,6 +184,44 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
     activeProvider: provider,
   }))
   console.log(`Active provider: ${provider}`)
+}
+
+async function providerInfo(): Promise<void> {
+  const profile = await readProviderProfile()
+  const providers = createHarnessProviderRegistry(profile.credentials)
+  let user: HarnessUser
+  switch (profile.activeProvider) {
+    case 'gateway': {
+      const credential = profile.credentials.gateway
+      if (!credential) {
+        throw new Error(
+          'Gateway is not connected with Vercel. Run `sensos login vercel` first.'
+        )
+      }
+      const loadUser = providers.gateway.auth.user
+      if (!loadUser) throw new Error('Gateway user info is unavailable.')
+      user = await loadUser(credential)
+      break
+    }
+    case 'codex': {
+      const credential = profile.credentials.codex
+      if (!credential) {
+        throw new Error(
+          'Codex is not connected. Run `sensos login codex` first.'
+        )
+      }
+      const loadUser = providers.codex.auth.user
+      if (!loadUser) throw new Error('Codex user info is unavailable.')
+      user = await loadUser(credential)
+      break
+    }
+  }
+  console.log(`active provider: ${profile.activeProvider}`)
+  console.log(`name: ${user.name}`)
+  console.log(`email: ${user.email}`)
+  if (user.affiliation) {
+    console.log(`${user.affiliation.kind}: ${user.affiliation.name}`)
+  }
 }
 
 async function logout(authKey: HarnessAuthKey): Promise<void> {
@@ -607,6 +646,10 @@ async function main(): Promise<void> {
   }
   if (command === 'provider') {
     const provider = args[0]
+    if (provider === 'info') {
+      await providerInfo()
+      return
+    }
     if (provider !== 'gateway' && provider !== 'codex') {
       throw new Error('Usage: sensos provider <gateway|codex>')
     }

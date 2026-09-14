@@ -3,7 +3,7 @@ import {
   type OpenAIResponsesProviderOptions,
 } from '@ai-sdk/openai'
 import { z } from 'zod'
-import { loginWithCodex } from '@/auth/oauth/codex'
+import { getCodexUser, loginWithCodex } from '@/auth/oauth/codex'
 import {
   SensosHarnessProvider,
   type HarnessModel,
@@ -146,7 +146,7 @@ export function createCodexHarnessProvider(
       login: (options: CodexLoginOptions) =>
         loginWithCodex(options.openUrl, options.signal),
       token: value => Promise.resolve(value.accessToken),
-      user: value => Promise.resolve({ accountId: value.accountId }),
+      user: value => getCodexUser(value, dependencies.fetch),
     },
   })
 }

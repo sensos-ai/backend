@@ -7,6 +7,15 @@ export interface HarnessModel<ModelId extends string = string> {
   priority?: number
 }
 
+export interface HarnessUser {
+  name: string
+  email: string
+  affiliation?: {
+    kind: 'team' | 'organization'
+    name: string
+  }
+}
+
 export type OptionalArgument<T> = [T] extends [undefined]
   ? []
   : [options: T]

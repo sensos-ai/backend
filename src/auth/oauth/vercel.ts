@@ -3,6 +3,7 @@ import { hostname } from 'node:os'
 const CLIENT_ID = 'cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp'
 const ISSUER = 'https://vercel.com/'
 const TEAMS_URL = 'https://api.vercel.com/v2/teams?limit=100'
+const USER_URL = 'https://api.vercel.com/v2/user'
 
 export type VercelOAuthCredential = {
   accessToken: string
@@ -11,6 +12,24 @@ export type VercelOAuthCredential = {
 }
 
 export type VercelTeam = { id: string; name: string }
+
+export type VercelUser = {
+  name: string
+  email: string
+  affiliation?: {
+    kind: 'team'
+    name: string
+  }
+}
+
+export type VercelUserCredential = VercelOAuthCredential & {
+  teamId?: string
+}
+
+export type OAuthFetch = (
+  input: string | URL | Request,
+  init?: RequestInit
+) => Promise<Response>
 
 type DeviceAuthorization = {
   device_code: string
@@ -55,6 +74,57 @@ async function authorizationServer(
     throw new Error('Could not load Vercel OAuth configuration.')
   }
   return value as AuthorizationServer
+}
+
+export async function getVercelUser(
+  credential: VercelUserCredential,
+  fetchImpl: OAuthFetch = fetch
+): Promise<VercelUser> {
+  const headers = {
+    authorization: `Bearer ${credential.accessToken}`,
+    'user-agent': userAgent(),
+  }
+  const [userResponse, teamResponse] = await Promise.all([
+    fetchImpl(USER_URL, { headers }),
+    credential.teamId
+      ? fetchImpl(`https://api.vercel.com/v2/teams/${credential.teamId}`, {
+          headers,
+        })
+      : undefined,
+  ])
+  const userValue = (await userResponse.json()) as {
+    user?: { name?: unknown; username?: unknown; email?: unknown }
+  }
+  if (
+    !userResponse.ok ||
+    typeof userValue.user?.email !== 'string' ||
+    typeof (userValue.user.name ?? userValue.user.username) !== 'string'
+  ) {
+    if (userResponse.status === 401 || userResponse.status === 403) {
+      throw new Error(
+        'Vercel login expired. Run `sensos login vercel` again.'
+      )
+    }
+    throw new Error(`Could not load Vercel user (${userResponse.status}).`)
+  }
+
+  let teamName: string | undefined
+  if (teamResponse) {
+    const teamValue = (await teamResponse.json()) as { name?: unknown }
+    if (!teamResponse.ok) {
+      throw new Error(
+        `Could not load Vercel team (${teamResponse.status}).`
+      )
+    }
+    if (typeof teamValue.name === 'string') teamName = teamValue.name
+  }
+  return {
+    name: String(userValue.user.name ?? userValue.user.username),
+    email: userValue.user.email,
+    ...(teamName
+      ? { affiliation: { kind: 'team' as const, name: teamName } }
+      : {}),
+  }
 }
 
 export async function beginVercelLogin(signal?: AbortSignal) {
