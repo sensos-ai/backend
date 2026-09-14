@@ -1,5 +1,8 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider'
-import type { ScriptedScenario } from '../fixtures/llm/scenario'
+import type {
+  ScriptedChunk,
+  ScriptedScenario,
+} from '../fixtures/llm/scenario'
 import {
   ScriptedScenarioController,
   streamScriptedTurn,
@@ -23,6 +26,15 @@ function eventStream(
   return stream.pipeThrough(
     new TransformStream({
       transform(chunk, controller) {
+        const scriptedChunk = chunk as ScriptedChunk
+        if (scriptedChunk.type === 'malformed') {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${scriptedChunk.data ?? '{invalid-json'}\n\n`
+            )
+          )
+          return
+        }
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`)
         )
@@ -39,6 +51,7 @@ export function startScriptedGateway(
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
+    idleTimeout: 60,
     async fetch(request) {
       const url = new URL(request.url)
       if (
@@ -73,7 +86,8 @@ export function startScriptedGateway(
           consumed.turn,
           consumed.actual,
           controller,
-          request.signal
+          request.signal,
+          { allowMalformed: true }
         )
         if (!streaming) {
           const chunks = await Array.fromAsync(stream)

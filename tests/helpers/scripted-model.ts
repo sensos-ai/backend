@@ -228,7 +228,8 @@ export async function streamScriptedTurn(
   turn: ScriptedTurn,
   actual: ScriptedRequestSummary,
   controller: ScriptedScenarioController,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  options: { allowMalformed?: boolean } = {}
 ): Promise<ReadableStream<LanguageModelV4StreamPart>> {
   let streamController: ReadableStreamDefaultController<LanguageModelV4StreamPart>
   let aborted = signal?.aborted ?? false
@@ -261,6 +262,15 @@ export async function streamScriptedTurn(
               continue
             }
             if (chunk.type === 'throw') throw new Error(chunk.message)
+            if (chunk.type === 'malformed') {
+              if (!options.allowMalformed) {
+                throw new Error(
+                  'Malformed chunks require the HTTP gateway'
+                )
+              }
+              value.enqueue(chunk as unknown as LanguageModelV4StreamPart)
+              continue
+            }
             value.enqueue(chunk)
           }
           if (!aborted) value.close()

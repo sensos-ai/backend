@@ -318,7 +318,9 @@ export async function executeRun(
                     responseMessage,
                     status === 'cancelled' ? '[Stopped]' : '[Interrupted]'
                   )
-                : undefined,
+                : hasAssistantContent(responseMessage)
+                  ? responseMessage
+                  : undefined,
           error: failure,
           finishReason:
             status === 'completed' ? terminal.finishReason : undefined,
@@ -334,11 +336,7 @@ export async function executeRun(
           seq: sequence,
           chunk: terminalChunk,
         })
-        if (
-          status === 'completed' ||
-          status === 'interrupted' ||
-          status === 'cancelled'
-        ) {
+        if (status !== 'failed' || hasAssistantContent(responseMessage)) {
           const messages = await listMessages(step.db)
           await projectTranscript(
             step.state.sessionId,
@@ -377,7 +375,11 @@ export async function executeRun(
                     : responseMessage,
                   status === 'cancelled' ? '[Stopped]' : '[Interrupted]'
                 )
-              : undefined,
+              : hasAssistantContent(streamedResponseMessage)
+                ? streamedResponseMessage
+                : hasAssistantContent(responseMessage)
+                  ? responseMessage
+                  : undefined,
           error: status === 'failed' ? failure : undefined,
         })
         step.broadcast('frame', {

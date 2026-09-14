@@ -26,6 +26,7 @@ export type ScriptedChunk =
   | LanguageModelV4StreamPart
   | { type: 'hold'; gate: string }
   | { type: 'throw'; message: string }
+  | { type: 'malformed'; data?: string }
 
 export type ScriptedTurn = {
   expect?: ScriptedRequestExpectation
