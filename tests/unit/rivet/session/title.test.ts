@@ -4,6 +4,7 @@ import {
   generateSessionTitle,
   normalizeSessionTitle,
   shouldGenerateSessionTitle,
+  titleMaxOutputTokens,
   TITLE_MODEL,
   userMessageText,
 } from '@/runtime/actors/session/title'
@@ -21,6 +22,11 @@ const usage = {
 describe('session titles', () => {
   test('uses the verified gateway nano model id', () => {
     expect(TITLE_MODEL).toBe('openai/gpt-5-nano')
+  })
+
+  test('omits the unsupported output token limit for Codex', () => {
+    expect(titleMaxOutputTokens('codex')).toBeUndefined()
+    expect(titleMaxOutputTokens('gateway')).toBe(30)
   })
 
   test('extracts only user text and normalizes the generated title', () => {

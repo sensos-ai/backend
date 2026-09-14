@@ -17,6 +17,15 @@ import {
 
 export const TITLE_MODEL: GatewayModelId = 'openai/gpt-5-nano'
 const MAX_TITLE_LENGTH = 80
+const MAX_TITLE_OUTPUT_TOKENS = 30
+
+export function titleMaxOutputTokens(
+  provider: 'codex' | 'gateway'
+): number | undefined {
+  // ChatGPT's Codex endpoint rejects max_output_tokens. The gateway accepts
+  // the limit, so keep title generation bounded wherever it is supported.
+  return provider === 'codex' ? undefined : MAX_TITLE_OUTPUT_TOKENS
+}
 
 export function shouldGenerateSessionTitle(input: {
   created: boolean
@@ -81,7 +90,7 @@ export async function generateSessionTitle(
   if (options.model || options.features?.useMockModel) {
     const result = await generateText({
       model: options.model ?? titleTestModel(prompt),
-      maxOutputTokens: 30,
+      maxOutputTokens: MAX_TITLE_OUTPUT_TOKENS,
       instructions:
         'Create a concise title for this chat session. Return only the title, with no quotes or punctuation wrapper. Use at most 8 words.',
       prompt,
@@ -104,7 +113,6 @@ export async function generateSessionTitle(
   if (activeProvider === 'codex') {
     const result = streamText({
       model,
-      maxOutputTokens: 30,
       instructions:
         'Create a concise title for this chat session. Return only the title, with no quotes or punctuation wrapper. Use at most 8 words.',
       prompt,
@@ -115,7 +123,7 @@ export async function generateSessionTitle(
 
   const result = await generateText({
     model,
-    maxOutputTokens: 30,
+    maxOutputTokens: titleMaxOutputTokens(activeProvider),
     instructions:
       'Create a concise title for this chat session. Return only the title, with no quotes or punctuation wrapper. Use at most 8 words.',
     prompt,
