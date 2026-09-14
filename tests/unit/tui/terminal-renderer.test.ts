@@ -26,8 +26,10 @@ class FakeInput extends EventEmitter implements TerminalInput {
 class FakeOutput extends EventEmitter implements TerminalOutput {
   columns = 100
   rows = 30
+  chunks: string[] = []
 
-  write() {
+  write(chunk: string | Uint8Array) {
+    this.chunks.push(chunk.toString())
     return true
   }
 }
@@ -51,6 +53,34 @@ function pendingStream() {
     },
   }
 }
+
+const commands = [
+  {
+    name: '/switch-session' as const,
+    description: 'Switch to another session',
+    run: () => 'switch-session' as const,
+  },
+]
+
+describe('TerminalRenderer slash command completion', () => {
+  test('renders a ghost suffix and accepts it with Tab', async () => {
+    const input = new FakeInput()
+    const output = new FakeOutput()
+    const renderer = new TerminalRenderer({ input, output })
+    const prompt = renderer.readPrompt({ commands })
+
+    await Promise.resolve()
+    input.emit('data', Buffer.from('/sw'))
+    expect(output.chunks.join('')).toContain(
+      '/sw█\x1b[2mitch-session\x1b[0m'
+    )
+
+    input.emit('data', Buffer.from('\t'))
+    input.emit('data', Buffer.from('\r'))
+
+    await expect(prompt).resolves.toBe('/switch-session')
+  })
+})
 
 describe('TerminalRenderer stream controls', () => {
   test('/switch-session detaches locally without cancelling the run', async () => {
@@ -76,6 +106,7 @@ describe('TerminalRenderer stream controls', () => {
         continueSession: true,
         waitForExit: false,
         detachOnInterrupt: true,
+        commands,
         onSubmitDuringStream: async prompt => {
           deliveries.push(prompt)
         },
@@ -83,7 +114,8 @@ describe('TerminalRenderer stream controls', () => {
     )
 
     await Promise.resolve()
-    input.emit('data', Buffer.from('/switch-session'))
+    input.emit('data', Buffer.from('/sw'))
+    input.emit('data', Buffer.from('\t'))
     input.emit('data', Buffer.from('\r'))
 
     await expect(rendered).rejects.toMatchObject({

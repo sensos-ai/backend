@@ -26,6 +26,19 @@ export function matchingSlashCommands(
   )
 }
 
+export function slashCommandCompletion(
+  input: string,
+  commands: readonly SlashCommand[]
+): SlashCommand | undefined {
+  const matches = matchingSlashCommands(input, commands)
+  if (matches.length !== 1) return undefined
+
+  const [command] = matches
+  return command && command.name.length > input.length
+    ? command
+    : undefined
+}
+
 export function findSlashCommand(
   input: string,
   commands: readonly SlashCommand[]

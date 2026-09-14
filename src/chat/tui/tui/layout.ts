@@ -19,6 +19,7 @@ export type TUIScreenState = {
   rightTitle?: string
   body: string
   input: string
+  inputSuggestion?: string
   inputActive: boolean
   inputCursorVisible?: boolean
   scrollOffset: number
@@ -99,7 +100,11 @@ export function renderScreenViewport(
     topBorder(width, state.inputActive ? (state.status ?? '') : 'Status'),
     boxLine(
       state.inputActive
-        ? `> ${state.input}${state.inputCursorVisible === false ? ' ' : '█'}`
+        ? `> ${state.input}${state.inputCursorVisible === false ? ' ' : '█'}${
+            state.inputSuggestion
+              ? `\x1b[2m${state.inputSuggestion}\x1b[0m`
+              : ''
+          }`
         : (state.status ?? 'Streaming... ↑/↓ scroll · Ctrl+C quit'),
       width
     ),

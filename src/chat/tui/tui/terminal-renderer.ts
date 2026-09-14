@@ -12,6 +12,7 @@ import type {
 import {
   matchingSlashCommands,
   parseStreamingInput,
+  slashCommandCompletion,
   type DeliveryPriority,
   type SlashCommand,
 } from '../commands'
@@ -97,6 +98,7 @@ export type TerminalKey =
   | { type: 'character'; value: string }
   | { type: 'backspace' }
   | { type: 'enter' }
+  | { type: 'tab' }
   | { type: 'up' }
   | { type: 'down' }
   | { type: 'page-up' }
@@ -186,7 +188,7 @@ const connectionSpinnerFrames = [
 const connectionSectionId = '__sensos_agent_connection__'
 
 const inputCursorBlinkMs = 500
-const activeControls = '↑/↓ · PgUp/PgDn · Esc/Ctrl+C'
+const activeControls = 'Tab complete · ↑/↓ · PgUp/PgDn · Esc/Ctrl+C'
 const doneControls = '↑/↓ · PgUp/PgDn · q/Esc/Ctrl+C'
 const processingStatus = `Processing input... ${activeControls}`
 const processingToolResultsStatus = `Processing tool results... ${activeControls}`
@@ -340,6 +342,9 @@ export class TerminalRenderer {
             this.#showInputCursor()
             this.#paint()
             break
+          case 'tab':
+            this.#acceptSlashCommandCompletion()
+            break
           case 'enter': {
             const prompt = this.#inputText
             if (!prompt.trim()) {
@@ -395,6 +400,7 @@ export class TerminalRenderer {
     this.#start(options)
     this.#inputActive = Boolean(options?.onSubmitDuringStream)
     this.#inputText = ''
+    this.#commands = options?.commands ?? this.#commands
     this.#status = processingStatus
     this.#addSubmittedPrompt(options?.submittedPrompt)
     this.#interrupted = false
@@ -629,6 +635,14 @@ export class TerminalRenderer {
           this.#inputText = this.#inputText.slice(0, -1)
           this.#showInputCursor()
           this.#paint()
+        }
+        break
+      case 'tab':
+        if (
+          options?.onSubmitDuringStream &&
+          !this.#streamSubmissionPending
+        ) {
+          this.#acceptSlashCommandCompletion()
         }
         break
       case 'enter': {
@@ -980,6 +994,10 @@ export class TerminalRenderer {
   }
 
   #paint() {
+    const completion = slashCommandCompletion(
+      this.#inputText,
+      this.#commands
+    )
     const frame = renderScreenViewport({
       width: this.#width(),
       height: this.#height(),
@@ -987,6 +1005,7 @@ export class TerminalRenderer {
       rightTitle: formatTokenCount(this.#totalTokens, this.#contextSize),
       visibleBodyLines: this.#visibleBodyLines(),
       input: this.#inputText,
+      inputSuggestion: completion?.name.slice(this.#inputText.length),
       inputActive: this.#inputActive,
       inputCursorVisible: this.#inputCursorVisible,
       status:
@@ -1000,6 +1019,18 @@ export class TerminalRenderer {
     })
 
     this.#frameBuffer.present(frame)
+  }
+
+  #acceptSlashCommandCompletion() {
+    const completion = slashCommandCompletion(
+      this.#inputText,
+      this.#commands
+    )
+    if (!completion) return
+
+    this.#inputText = completion.name
+    this.#showInputCursor()
+    this.#paint()
   }
 
   #repaint() {
@@ -1682,6 +1713,8 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case '\r':
     case '\n':
       return { type: 'enter' }
+    case '\t':
+      return { type: 'tab' }
     case '\u007f':
     case '\b':
       return { type: 'backspace' }

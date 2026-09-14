@@ -3,6 +3,7 @@ import {
   findSlashCommand,
   matchingSlashCommands,
   parseStreamingInput,
+  slashCommandCompletion,
 } from '@/chat/tui/commands'
 
 const commands = [
@@ -28,6 +29,19 @@ describe('slash commands', () => {
   test('only executes an exact command', () => {
     expect(findSlashCommand('/MODEL', commands)?.name).toBe('/model')
     expect(findSlashCommand('/mo', commands)).toBeUndefined()
+  })
+
+  test('completes only an unambiguous partial command', () => {
+    expect(slashCommandCompletion('/sw', commands)?.name).toBe(
+      '/switch-session'
+    )
+    expect(slashCommandCompletion('/', commands)).toBeUndefined()
+    expect(
+      slashCommandCompletion('/switch-session', commands)
+    ).toBeUndefined()
+    expect(
+      slashCommandCompletion('/sw argument', commands)
+    ).toBeUndefined()
   })
 
   test('separates stream controls from delivered messages', () => {

@@ -324,6 +324,7 @@ export class AgentTUIRunner {
               reasoning: this.reasoning,
               responseStatistics: this.responseStatistics,
               contextSize: this.contextSize,
+              commands: this.commands,
               waitForExit: false,
               onStopDuringStream: this.transport
                 ? async () => {
