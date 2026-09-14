@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 const AUTH_BASE_URL = 'https://auth.openai.com'
 const REDIRECT_URI = 'http://localhost:1455/auth/callback'
+const DEVICE_REDIRECT_PATH = '/deviceauth/callback'
+const DEVICE_AUTH_TIMEOUT_MS = 15 * 60 * 1000
 
 export type CodexOAuthCredential = {
   accessToken: string
@@ -25,6 +27,18 @@ export type CodexAuthFetch = (
   input: string | URL | Request,
   init?: RequestInit
 ) => Promise<Response>
+
+export type CodexDeviceLoginOptions = {
+  onDeviceCode: (
+    verificationUrl: string,
+    userCode: string
+  ) => void | Promise<void>
+  signal?: AbortSignal
+  fetch?: CodexAuthFetch
+  authBaseUrl?: string
+  now?: () => number
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
+}
 
 export async function getCodexUser(
   credential: CodexOAuthCredential,
@@ -127,6 +141,154 @@ function accountId(accessToken: string): string {
     )
   }
   return id
+}
+
+function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('OpenAI Codex login cancelled.'))
+      return
+    }
+    const timeout = setTimeout(finish, milliseconds)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new Error('OpenAI Codex login cancelled.'))
+    }
+    function finish() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export async function loginWithCodexDevice(
+  options: CodexDeviceLoginOptions
+): Promise<CodexOAuthCredential> {
+  const fetchImpl = options.fetch ?? fetch
+  const authBaseUrl = (options.authBaseUrl ?? AUTH_BASE_URL).replace(
+    /\/$/,
+    ''
+  )
+  const clientId = process.env.SENSOS_CODEX_CLIENT_ID ?? CLIENT_ID
+  const response = await fetchImpl(
+    `${authBaseUrl}/api/accounts/deviceauth/usercode`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId }),
+      signal: options.signal,
+    }
+  )
+  const device = (await response.json()) as {
+    device_auth_id?: unknown
+    user_code?: unknown
+    interval?: unknown
+  }
+  const interval =
+    typeof device.interval === 'string'
+      ? Number(device.interval.trim())
+      : device.interval
+  if (
+    !response.ok ||
+    typeof device.device_auth_id !== 'string' ||
+    typeof device.user_code !== 'string' ||
+    typeof interval !== 'number' ||
+    !Number.isFinite(interval) ||
+    interval < 0
+  ) {
+    throw new Error(
+      `OpenAI Codex device code request failed (${response.status}).`
+    )
+  }
+
+  await options.onDeviceCode(
+    `${authBaseUrl}/codex/device`,
+    device.user_code
+  )
+  const now = options.now ?? Date.now
+  const wait = options.sleep ?? sleep
+  const deadline = now() + DEVICE_AUTH_TIMEOUT_MS
+  let authorization:
+    | { authorization_code: string; code_verifier: string }
+    | undefined
+  while (now() < deadline) {
+    const poll = await fetchImpl(
+      `${authBaseUrl}/api/accounts/deviceauth/token`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          device_auth_id: device.device_auth_id,
+          user_code: device.user_code,
+        }),
+        signal: options.signal,
+      }
+    )
+    if (poll.ok) {
+      const value = (await poll.json()) as {
+        authorization_code?: unknown
+        code_verifier?: unknown
+      }
+      if (
+        typeof value.authorization_code !== 'string' ||
+        typeof value.code_verifier !== 'string'
+      ) {
+        throw new Error(
+          'OpenAI Codex returned an incomplete device authorization.'
+        )
+      }
+      authorization = {
+        authorization_code: value.authorization_code,
+        code_verifier: value.code_verifier,
+      }
+      break
+    }
+    if (poll.status !== 403 && poll.status !== 404) {
+      throw new Error(`OpenAI Codex device login failed (${poll.status}).`)
+    }
+    await wait(Math.min(interval * 1000, deadline - now()), options.signal)
+  }
+  if (!authorization) {
+    throw new Error(
+      'OpenAI Codex device login timed out after 15 minutes.'
+    )
+  }
+
+  const tokenResponse = await fetchImpl(`${authBaseUrl}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      code: authorization.authorization_code,
+      code_verifier: authorization.code_verifier,
+      redirect_uri: `${authBaseUrl}${DEVICE_REDIRECT_PATH}`,
+    }),
+    signal: options.signal,
+  })
+  const token = (await tokenResponse.json()) as {
+    access_token?: unknown
+    refresh_token?: unknown
+    expires_in?: unknown
+  }
+  if (
+    !tokenResponse.ok ||
+    typeof token.access_token !== 'string' ||
+    typeof token.refresh_token !== 'string' ||
+    typeof token.expires_in !== 'number'
+  ) {
+    throw new Error(
+      'OpenAI Codex returned an incomplete OAuth credential.'
+    )
+  }
+  return {
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token,
+    expiresAt: Date.now() + token.expires_in * 1000,
+    accountId: accountId(token.access_token),
+  }
 }
 
 function waitForCallback(

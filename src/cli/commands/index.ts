@@ -107,7 +107,10 @@ function isHarnessAuthKey(value: string): value is HarnessAuthKey {
   return authKeys.some(authKey => authKey === value)
 }
 
-async function login(authKey: HarnessAuthKey): Promise<void> {
+async function login(
+  authKey: HarnessAuthKey,
+  device = false
+): Promise<void> {
   const controller = new AbortController()
   const cancel = () => controller.abort()
   process.once('SIGINT', cancel)
@@ -116,9 +119,24 @@ async function login(authKey: HarnessAuthKey): Promise<void> {
     const providers = createHarnessProviderRegistry(profile.credentials)
     const provider = createHarnessAuthRegistry(providers)[authKey]
     if (provider.sensosId === 'codex') {
-      console.log('Opening OpenAI Codex sign-in in your browser.')
+      console.log(
+        device
+          ? 'Starting OpenAI Codex device sign-in.'
+          : 'Opening OpenAI Codex sign-in in your browser.'
+      )
       const credential = await provider.auth.login({
         openUrl: openBrowser,
+        device,
+        onDeviceCode: async (verificationUrl, userCode) => {
+          console.log(`Open this URL to sign in:\n${verificationUrl}`)
+          console.log(`Enter this one-time code:\n${userCode}`)
+          try {
+            await openBrowser(verificationUrl)
+          } catch {
+            console.error('Could not open a browser. Use the URL above.')
+          }
+          console.log('Waiting for sign-in...')
+        },
         signal: controller.signal,
       })
       await updateProviderProfile(profile => ({
@@ -632,9 +650,16 @@ async function main(): Promise<void> {
   if (command === 'login') {
     const provider = args[0] ?? defaultAuthKey
     if (!isHarnessAuthKey(provider)) {
-      throw new Error(`Usage: sensos login [${authKeyUsage}]`)
+      throw new Error(`Usage: sensos login [${authKeyUsage}] [--device]`)
     }
-    await login(provider)
+    const device = args[1] === '--device'
+    if (
+      args.length > (device ? 2 : 1) ||
+      (device && provider !== 'codex')
+    ) {
+      throw new Error(`Usage: sensos login [${authKeyUsage}] [--device]`)
+    }
+    await login(provider, device)
     return
   }
   if (command === 'logout') {

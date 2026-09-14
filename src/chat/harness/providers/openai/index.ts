@@ -5,6 +5,7 @@ import {
 import { z } from 'zod'
 import {
   getCodexUser,
+  loginWithCodexDevice,
   loginWithCodex,
   refreshCodexCredential,
 } from '@/auth/oauth/codex'
@@ -28,6 +29,11 @@ export interface CodexCatalogModel extends HarnessModel<CodexModelId> {
 
 export type CodexLoginOptions = {
   openUrl: (url: string) => Promise<void>
+  device?: boolean
+  onDeviceCode?: (
+    verificationUrl: string,
+    userCode: string
+  ) => void | Promise<void>
   signal?: AbortSignal
 }
 
@@ -148,7 +154,16 @@ export function createCodexHarnessProvider(
     },
     auth: {
       login: (options: CodexLoginOptions) =>
-        loginWithCodex(options.openUrl, options.signal),
+        options.device
+          ? loginWithCodexDevice({
+              onDeviceCode:
+                options.onDeviceCode ??
+                ((verificationUrl, userCode) => {
+                  console.log(`${verificationUrl}\n${userCode}`)
+                }),
+              signal: options.signal,
+            })
+          : loginWithCodex(options.openUrl, options.signal),
       token: value => Promise.resolve(value.accessToken),
       refresh: value => refreshCodexCredential(value, dependencies.fetch),
       user: value => getCodexUser(value, dependencies.fetch),
