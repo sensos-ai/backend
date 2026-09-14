@@ -14,7 +14,7 @@
     "test": "bun run test:unit && bun run test:integration && bun run test:e2e",
     "test:unit": "bun test --no-orphans --parallel tests/unit",
     "test:integration": "bun run tests/integration/run.ts",
-    "test:e2e": "RIVETKIT_STORAGE_PATH=/tmp/sensos-suite-$$ bun test --no-orphans --pass-with-no-tests tests/e2e",
+    "test:e2e": "bun run build && bun test --no-orphans tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "db:generate": "bun run scripts/db/generate.ts",
