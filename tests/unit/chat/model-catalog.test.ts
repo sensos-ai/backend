@@ -7,6 +7,7 @@ import {
   type ModelCatalog,
 } from '@/chat/harness/providers/model-catalog'
 import {
+  CODEX_MODEL_CLIENT_VERSION,
   CODEX_MODELS_URL,
   getCodexModels,
 } from '@/chat/harness/providers/openai'
@@ -82,10 +83,17 @@ describe('provider model catalogs', () => {
     )
 
     expect(request?.url).toBe(CODEX_MODELS_URL)
+    expect(
+      new URL(request?.url ?? '').searchParams.get('client_version')
+    ).toBe(CODEX_MODEL_CLIENT_VERSION)
     expect(request?.headers.get('authorization')).toBe(
       'Bearer access-token'
     )
     expect(request?.headers.get('chatgpt-account-id')).toBe('account-id')
+    expect(request?.headers.get('originator')).toBe('codex_cli_rs')
+    expect(request?.headers.get('user-agent')).toBe(
+      `codex_cli_rs/${CODEX_MODEL_CLIENT_VERSION}`
+    )
     expect(models).toEqual([
       {
         id: 'gpt-visible',

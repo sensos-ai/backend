@@ -11,8 +11,10 @@ export type ModelCatalogFetch = (
   init?: RequestInit
 ) => Promise<Response>
 
-export const CODEX_MODELS_URL =
-  'https://chatgpt.com/backend-api/codex/models'
+// This endpoint uses the client version to gate the catalog schema and models.
+// Bump this only when Sensos supports the corresponding Codex model contract.
+export const CODEX_MODEL_CLIENT_VERSION = '0.145.0'
+export const CODEX_MODELS_URL = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_MODEL_CLIENT_VERSION}`
 
 const codexModelsResponseSchema = z.object({
   models: z.array(
@@ -34,7 +36,8 @@ export async function getCodexModels(
     headers: {
       Authorization: `Bearer ${credential.accessToken}`,
       'chatgpt-account-id': credential.accountId,
-      originator: 'sensos',
+      originator: 'codex_cli_rs',
+      'User-Agent': `codex_cli_rs/${CODEX_MODEL_CLIENT_VERSION}`,
       Accept: 'application/json',
     },
   })
