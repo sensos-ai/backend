@@ -3,6 +3,7 @@ node_modules/
 /log.txt
 .DS_Store
 dist/
+coverage/
 
 # turborepo / next
 .turbo/

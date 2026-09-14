@@ -1,3 +1,4 @@
+import '../../setup'
 import { expect, onTestFinished, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { setup } from 'rivetkit'
