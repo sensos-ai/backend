@@ -214,3 +214,44 @@ test('transport stop cancels the active actor run and persists its cutoff', asyn
     )
   ).toBe(true)
 }, 20_000)
+
+test('cancelling a queued run finalizes it and releases the session', async () => {
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('queued cancellation')
+  const connection = client.session
+    .getOrCreate([trackedActorKey('session')], {
+      createWithInput: { cwd: process.cwd() },
+    })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
+
+  const delivery = inbox('cancel before provider execution')
+  const started = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === delivery.id && event.status === 'started',
+    { description: 'queued cancellation run to be accepted' }
+  )
+  await connection.deliver(delivery)
+  const runId = (await started).runId
+  if (!runId) throw new Error('Missing queued cancellation run id')
+
+  await connection.cancel(runId)
+
+  await waitForValue(
+    () => connection.getSession(),
+    snapshot =>
+      snapshot.activeRunId === undefined &&
+      snapshot.runStatus === 'cancelled',
+    { description: 'queued cancellation to release the session' }
+  )
+  expect(await connection.getRun(runId)).toMatchObject({
+    status: 'cancelled',
+    startedAt: null,
+  })
+  expect((await connection.streamSnapshot(runId, -1)).frames).toEqual([
+    {
+      seq: 0,
+      chunk: { type: 'abort', reason: 'cancelled before execution' },
+    },
+  ])
+}, 20_000)
