@@ -106,7 +106,8 @@ type StreamBridge = {
 }
 
 function createStreamBridge(
-  connection: SessionTransportConnection
+  connection: SessionTransportConnection,
+  onFrame: (runId: string, seq: number) => void
 ): StreamBridge {
   let controller: ReadableStreamDefaultController<UIMessageChunk>
   let runId: string | undefined
@@ -139,6 +140,7 @@ function createStreamBridge(
     const key = `${frame.runId}:${frame.seq}`
     if (seen.has(key)) return
     seen.add(key)
+    onFrame(frame.runId, frame.seq)
     controller.enqueue(frame.chunk)
   }
   const emitStatus = (event: StatusChangedEvent) => {
@@ -238,6 +240,7 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   readonly #connection: SessionTransportConnection
   readonly #clientId: string
   readonly #activeBridges = new Set<StreamBridge>()
+  readonly #lastSeenSeq = new Map<string, number>()
 
   constructor(
     connection: SessionConnection,
@@ -394,7 +397,10 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       }
       bridge.setRunId(session.activeRunId)
       bridge.replay(
-        await this.#connection.streamSnapshot(session.activeRunId, -1)
+        await this.#connection.streamSnapshot(
+          session.activeRunId,
+          this.#lastSeenSeq.get(session.activeRunId) ?? -1
+        )
       )
       return bridge.stream
     } catch (error) {
@@ -414,7 +420,10 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   }
 
   #createBridge(): StreamBridge {
-    const bridge = createStreamBridge(this.#connection)
+    const bridge = createStreamBridge(this.#connection, (runId, seq) => {
+      const previous = this.#lastSeenSeq.get(runId) ?? -1
+      if (seq > previous) this.#lastSeenSeq.set(runId, seq)
+    })
     this.#activeBridges.add(bridge)
     bridge.addCleanup(() => this.#activeBridges.delete(bridge))
     return bridge
