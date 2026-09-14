@@ -20,6 +20,11 @@ import {
   userMessageText,
 } from '../../title'
 import type { NextWork, SessionWorkflowContext } from '../types'
+import {
+  releaseRuntimeActivity,
+  retainRuntimeActivity,
+  runtimeActivityKey,
+} from '@/runtime/activity'
 
 const createMessageId = createIdGeneratorWithPrefix('msg')
 const createRunId = createIdGeneratorWithPrefix('run')
@@ -53,6 +58,8 @@ export async function submitRun(
     names: ['runs'],
     completable: true,
   })
+  const activityKey = runtimeActivityKey(queued.body.idempotencyId)
+  retainRuntimeActivity(activityKey)
   const submission = await context.step('submit-run', async step => {
     const result = await submitRunToDatabase(step.db, {
       runId: createRunId(),
@@ -146,5 +153,8 @@ export async function submitRun(
   })
 
   await queued.complete(submission)
+  if (!submission.accepted || submission.deduplicated) {
+    releaseRuntimeActivity(activityKey)
+  }
   return { kind: 'run', command: queued.body, submission }
 }

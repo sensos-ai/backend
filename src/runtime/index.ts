@@ -5,6 +5,10 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import { prepareAgentOsAssets } from './agentos-assets'
+import {
+  onRuntimeActivityChange,
+  runtimeActivityCount,
+} from './activity'
 import { registry } from './actors/registry'
 import { prepareRivetEngine } from './assets'
 import {
@@ -457,7 +461,8 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
   }
 
   const scheduleIdleShutdown = () => {
-    if (leases.size > 0 || shuttingDown) return
+    if (leases.size > 0 || runtimeActivityCount() > 0 || shuttingDown)
+      return
     if (idleTimer) return
     idleTimer = setTimeout(() => {
       idleTimer = undefined
@@ -527,6 +532,15 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
     })
   })
 
+  const removeActivityListener = onRuntimeActivityChange(count => {
+    if (count > 0) {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = undefined
+      return
+    }
+    scheduleIdleShutdown()
+  })
+
   const leaseSweep = setInterval(() => {
     const cutoff = Date.now() - LEASE_TIMEOUT_MS
     for (const [leaseId, heartbeatAt] of leases) {
@@ -546,6 +560,7 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
     console.error(error)
     await shutdown()
   })
+  process.once('exit', removeActivityListener)
   scheduleIdleShutdown()
   return await new Promise<never>(() => undefined)
 }

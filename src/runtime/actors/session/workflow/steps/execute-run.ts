@@ -32,6 +32,10 @@ import {
 import { aggregateUsage } from '../../utils/usage'
 import type { ExecuteRunInput, SessionWorkflowContext } from '../types'
 import type { TerminalRunOutcome } from '../types'
+import {
+  releaseRuntimeActivity,
+  runtimeActivityKey,
+} from '@/runtime/activity'
 
 const terminalStatuses = new Set([
   'cancelled',
@@ -108,13 +112,17 @@ export async function executeRun(
   context: SessionWorkflowContext,
   input: ExecuteRunInput
 ): Promise<void> {
+  const activityKey = runtimeActivityKey(input.command.idempotencyId)
   await context.step({
     name: 'execute-run',
     timeout: 0,
     maxRetries: 0,
     run: async step => {
       const run = await getRun(step.db, input.runId)
-      if (!run || terminalStatuses.has(run.status)) return
+      if (!run || terminalStatuses.has(run.status)) {
+        releaseRuntimeActivity(activityKey)
+        return
+      }
 
       let sequence = 0
       const publishFrame = async (chunk: UIMessageChunk) => {
@@ -165,6 +173,7 @@ export async function executeRun(
           messages,
           revision: finalized.revision,
         })
+        releaseRuntimeActivity(activityKey)
         return
       }
 
@@ -292,7 +301,7 @@ export async function executeRun(
         publishStatus('running')
 
         const { responseMessage, stepMetadata, endState } =
-          await consumeRunStream()
+          await step.keepAwake(consumeRunStream())
 
         acceptingInterrupts = false
 
@@ -412,6 +421,7 @@ export async function executeRun(
         if (step.vars.activeRun?.runId === run.id) {
           step.vars.activeRun = undefined
         }
+        releaseRuntimeActivity(activityKey)
       }
     },
   })

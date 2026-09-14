@@ -5,11 +5,18 @@ import {
   isWaitingForHumanInput,
   messageWithOrigin,
 } from '../utils/messages'
+import {
+  releaseRuntimeActivity,
+  retainRuntimeActivity,
+  runtimeActivityKey,
+} from '@/runtime/activity'
 
 export const deliver: SessionActions['deliver'] = async (
   context,
   inboxMessage
 ) => {
+  const activityKey = runtimeActivityKey(inboxMessage.id)
+  retainRuntimeActivity(activityKey)
   const activeRun = context.vars.activeRun
   const shouldSteer =
     inboxMessage.priority === 'now' ||
@@ -26,6 +33,7 @@ export const deliver: SessionActions['deliver'] = async (
       origin: inboxMessage.origin,
     } satisfies DeliveryRoutedEvent
     context.broadcast('deliveryRouted', receipt)
+    releaseRuntimeActivity(activityKey)
     return receipt
   }
   await context.queue.send('inbox', inboxMessage)
@@ -54,6 +62,7 @@ export const deliver: SessionActions['deliver'] = async (
         messages: await listMessages(context.db),
         revision: appended.revision,
       })
+      releaseRuntimeActivity(activityKey)
     }
     const receipt = {
       id: inboxMessage.id,

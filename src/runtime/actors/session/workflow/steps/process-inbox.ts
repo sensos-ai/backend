@@ -11,6 +11,10 @@ import {
   messageWithOrigin,
 } from '../../utils/messages'
 import type { SessionWorkflowContext } from '../types'
+import {
+  releaseRuntimeActivity,
+  runtimeActivityKey,
+} from '@/runtime/activity'
 
 export type InboxRouteDecision =
   | { kind: 'queue' }
@@ -72,9 +76,13 @@ export async function processInbox(
     names: ['inbox'],
   })
   const inboxMessage = queued.body
+  const activityKey = runtimeActivityKey(inboxMessage.id)
 
   await context.step('route-inbox', async step => {
-    if (await messageExists(step.db, inboxMessage.message.id)) return
+    if (await messageExists(step.db, inboxMessage.message.id)) {
+      releaseRuntimeActivity(activityKey)
+      return
+    }
     const activeRun = step.vars.activeRun
     const waitingForHumanInput =
       inboxMessage.priority === 'now' && !activeRun
@@ -93,6 +101,7 @@ export async function processInbox(
         reason: decision.reason,
         origin: inboxMessage.origin,
       })
+      releaseRuntimeActivity(activityKey)
       return
     }
 
@@ -133,6 +142,7 @@ export async function processInbox(
           messages,
           revision: appended.revision,
         })
+        releaseRuntimeActivity(activityKey)
       }
       step.broadcast('deliveryRouted', {
         id: inboxMessage.id,
