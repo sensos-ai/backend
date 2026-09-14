@@ -109,7 +109,7 @@ describe('TerminalRenderer slash command completion', () => {
     await Promise.resolve()
     input.emit('data', Buffer.from('/'))
     expect(output.chunks.join('')).toContain(
-      '\x1b[7m /switch-session  Switch to another session'
+      '\x1b[95m /switch-session  Switch to another session'
     )
     expect(output.chunks.join('')).toContain(
       '\x1b[2m /model           Choose the model'
@@ -117,7 +117,7 @@ describe('TerminalRenderer slash command completion', () => {
 
     input.emit('data', Buffer.from('\x1B[B'))
     expect(output.chunks.join('')).toContain(
-      '\x1b[7m /model           Choose the model'
+      '\x1b[95m /model           Choose the model'
     )
 
     input.emit('data', Buffer.from('\t'))

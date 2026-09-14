@@ -31,7 +31,8 @@ describe('slash command menu layout', () => {
     expect(lines).toHaveLength(12)
     expect(lines.every(line => visibleLength(line) === 50)).toBe(true)
     expect(lines[5]).toBe(`┌${'─'.repeat(48)}┐`)
-    expect(lines[6]).toContain('\x1b[7m')
+    expect(lines[6]).toContain('\x1b[95m')
+    expect(lines[6]).not.toContain('\x1b[7m')
     expect(lines[7]).toContain('\x1b[2m')
     expect(stripAnsi(lines[6] ?? '').indexOf('Switch sessions')).toBe(
       stripAnsi(lines[7] ?? '').indexOf('Choose the model')

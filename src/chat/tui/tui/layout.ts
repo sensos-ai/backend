@@ -160,7 +160,7 @@ function commandMenuLine(line: string, width: number, selected: boolean) {
     Math.max(0, contentWidth - visibleLength(visible))
   )} `
   const styled = selected
-    ? `\x1b[7m${content}\x1b[0m`
+    ? `\x1b[95m${content}\x1b[0m`
     : `\x1b[2m${content}\x1b[0m`
 
   return `│${styled}│`
