@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto'
 import { chmod, mkdir, open, rename, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getEnginePath } from '@rivetkit/engine-cli'
+import { getServicesPath } from '@rivet-dev/services'
 
 // The production build rewrites this resolver to a Bun file-loader import for
 // the selected release target. Source mode resolves the current host package.
 const engineAsset = getEnginePath()
+const servicesAsset = getServicesPath()
 
 declare const __SENSOS_ASSET_MANIFEST__: Record<string, string>
 
@@ -100,6 +102,20 @@ export async function prepareRivetEngine(root: string): Promise<string> {
     runtimeDir: join(root, 'runtime', 'engine'),
     name: 'sensos-engine',
     sourcePath: engineAsset,
+    digest,
+    executable: true,
+  })
+}
+
+export async function prepareRivetServices(root: string): Promise<string> {
+  if (!servicesAsset.startsWith('/$bunfs/')) return servicesAsset
+  const digest = bundledAssetDigest('rivet-services')
+  if (!digest)
+    throw new Error('Compiled Rivet Services asset digest is missing')
+  return materializeVersionedAsset({
+    runtimeDir: join(root, 'runtime', 'services'),
+    name: 'rivet-services',
+    sourcePath: servicesAsset,
     digest,
     executable: true,
   })

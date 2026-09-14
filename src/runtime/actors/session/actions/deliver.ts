@@ -16,7 +16,7 @@ export const deliver: SessionActions['deliver'] = async (
   inboxMessage
 ) => {
   const activityKey = runtimeActivityKey(inboxMessage.id)
-  retainRuntimeActivity(activityKey)
+  context.keepAwake(retainRuntimeActivity(activityKey))
   const activeRun = context.vars.activeRun
   const shouldSteer =
     inboxMessage.priority === 'now' ||

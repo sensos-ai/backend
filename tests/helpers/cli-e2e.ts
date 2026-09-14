@@ -24,7 +24,7 @@ const executable = resolve('dist/sensos')
 async function reserveRuntimePort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const candidate = 10_000 + Math.floor(Math.random() * 40_000)
-    const ports = [candidate, candidate + 1, candidate + 10]
+    const ports = [candidate, candidate + 1, candidate + 2, candidate + 10]
     const servers = ports.map(() => createServer())
     try {
       await Promise.all(
@@ -57,7 +57,7 @@ async function reserveRuntimePort(): Promise<number> {
 }
 
 async function bindRuntimePorts(port: number) {
-  const ports = [port, port + 1, port + 10]
+  const ports = [port, port + 1, port + 2, port + 10]
   const servers = ports.map(() => createServer())
   try {
     await Promise.all(
@@ -108,8 +108,10 @@ export type CliE2E = {
   screen(): string
   sendLine(value: string): Promise<void>
   sendControlC(): Promise<void>
-  detach(): Promise<number>
+  sendDown(): Promise<void>
+  disconnect(): Promise<number>
   resume(): Promise<void>
+  reserveSession(title: string): Promise<string>
   waitForScreen(text: string, timeoutMs?: number): Promise<string>
   waitForExit(timeoutMs?: number): Promise<number>
   waitForNoOrphans(timeoutMs?: number): Promise<void>
@@ -135,6 +137,7 @@ export async function startCliE2E(
   const state = join(root, 'state')
   const workspace = join(root, 'workspace')
   const logs = join(root, 'logs')
+  const cliPidPath = join(root, 'cli.pid')
   await Promise.all(
     [home, config, state, workspace, logs].map(path =>
       mkdir(path, { recursive: true })
@@ -148,7 +151,6 @@ export async function startCliE2E(
     cwd: workspace,
     title: `E2E ${name}`,
   })
-  catalog.close()
 
   const gateway = startScriptedGateway(scenario)
   const port = await reserveRuntimePort()
@@ -156,13 +158,19 @@ export async function startCliE2E(
     ? await bindRuntimePorts(port)
     : []
   const endpoint = `http://127.0.0.1:${port}`
+  const {
+    BUN_FEATURE_FLAG_NO_ORPHANS: _testRunnerOrphanPolicy,
+    ...runtimeEnvironment
+  } = process.env
   const env = {
-    ...process.env,
+    ...runtimeEnvironment,
     HOME: home,
     XDG_CONFIG_HOME: config,
     XDG_STATE_HOME: state,
     SENSOS_RUNTIME_PORT: String(port),
-    SENSOS_RUNTIME_IDLE_TTL_MS: '60000',
+    // Keep lifecycle tests fast. Active and queued runs pin the supervisor,
+    // so this short idle window does not weaken detachment coverage.
+    SENSOS_RUNTIME_IDLE_TTL_MS: '100',
     SENSOS_GATEWAY_BASE_URL: gateway.url,
     AI_GATEWAY_API_KEY: 'e2e-scripted-gateway',
     SENSOS_AI_EVENT_LOG_PATH: join(logs, 'ai-events.log'),
@@ -170,6 +178,10 @@ export async function startCliE2E(
     SENSOS_E2E_EXECUTABLE: executable,
     SENSOS_E2E_SESSION_ID: sessionId,
     SENSOS_E2E_WORKSPACE: workspace,
+    SENSOS_E2E_CLI_PID_PATH: cliPidPath,
+    // Run the compiled command directly so hard-disconnect tests can kill
+    // exactly the client process without involving the logging bootstrap.
+    SENSOS_LOGGING_READY: '1',
     TERM: 'xterm-256color',
   }
   let output = ''
@@ -184,6 +196,9 @@ export async function startCliE2E(
       'set timeout -1',
       'log_user 1',
       `spawn -noecho $env(SENSOS_E2E_EXECUTABLE) ${command} $env(SENSOS_E2E_SESSION_ID) --cwd $env(SENSOS_E2E_WORKSPACE)`,
+      'set pid_file [open $env(SENSOS_E2E_CLI_PID_PATH) w]',
+      'puts $pid_file [exp_pid]',
+      'close $pid_file',
       'interact',
       'set result [wait]',
       'exit [lindex $result 3]',
@@ -218,10 +233,30 @@ export async function startCliE2E(
       child.stdin.write('\x03')
       await child.stdin.flush()
     },
-    async detach() {
-      child.stdin.write('\x03')
+    async sendDown() {
+      child.stdin.write('\x1b[B')
       await child.stdin.flush()
-      return api.waitForExit()
+    },
+    async disconnect() {
+      const cliPid = Number((await readFile(cliPidPath, 'utf8')).trim())
+      if (!Number.isSafeInteger(cliPid) || cliPid <= 0) {
+        throw new Error(`Invalid CLI pid ${JSON.stringify(cliPid)}`)
+      }
+      const runtimeState = JSON.parse(
+        await readFile(
+          join(state, 'sensos', 'runtime', 'supervisor', 'state.json'),
+          'utf8'
+        )
+      ) as { pid?: number }
+      if (!runtimeState.pid || runtimeState.pid === cliPid) {
+        throw new Error(
+          `Invalid process ownership: CLI ${cliPid}, supervisor ${runtimeState.pid}`
+        )
+      }
+      process.kill(cliPid, 'SIGKILL')
+      const exitCode = await api.waitForExit()
+      process.kill(runtimeState.pid, 0)
+      return exitCode
     },
     async resume() {
       if (child.exitCode === null) {
@@ -229,6 +264,15 @@ export async function startCliE2E(
       }
       output += '\n--- resumed CLI ---\n'
       spawnCli('resume')
+    },
+    async reserveSession(title) {
+      const nextSessionId = `session_${name.replaceAll(/[^a-z0-9]+/gi, '-')}-${crypto.randomUUID()}`
+      await catalog.reserve({
+        sessionId: nextSessionId,
+        cwd: workspace,
+        title,
+      })
+      return nextSessionId
     },
     async waitForScreen(text, timeoutMs = 15_000) {
       return waitForValue(api.screen, value => value.includes(text), {
@@ -336,6 +380,7 @@ export async function startCliE2E(
       await Promise.race([runtimeStop.exited, Bun.sleep(8_000)])
       await gateway.stop()
       await Promise.allSettled(captures)
+      catalog.close()
       const artifacts = resolve('tests/e2e/artifacts')
       await mkdir(artifacts, { recursive: true })
       await Promise.all([

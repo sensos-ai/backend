@@ -4,18 +4,21 @@ import type {
   UIMessage,
   UIMessageChunk,
 } from 'ai'
+import type { Offset } from '@durable-streams/client'
 import type { ActorConn } from 'rivetkit/client'
 import type { HarnessFeatures } from '@/chat/harness'
-import type { RunRow } from '@/runtime/actors/session/db'
 import type {
   DeliveryRoutedEvent,
-  FrameEvent,
   InboxMessage,
   RunCommand,
   RunCompletion,
   StatusChangedEvent,
 } from '@/runtime/actors/session/config'
 import type { SessionActor } from '@/runtime/actors/session/types'
+import {
+  readRunStream,
+  type RunStreamItem,
+} from '@/runtime/durable-run-stream'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
 
 export type SessionConnection = ActorConn<SessionActor>
@@ -32,11 +35,6 @@ export type SessionSnapshot = {
   error?: string
 }
 
-type RunSnapshot = {
-  run: RunRow | undefined
-  frames: Array<Pick<FrameEvent, 'seq' | 'chunk'>>
-}
-
 type SessionTransportConnection = {
   send(
     name: 'runs',
@@ -50,12 +48,6 @@ type SessionTransportConnection = {
   deliver(input: InboxMessage): Promise<DeliveryRoutedEvent>
   cancel(runId: string): Promise<{ cancelled: boolean; runId: string }>
   getSession(): Promise<SessionSnapshot>
-  streamSnapshot(runId: string, afterSeq?: number): Promise<RunSnapshot>
-  on(event: 'frame', callback: (event: FrameEvent) => void): () => void
-  on(
-    event: 'statusChanged',
-    callback: (event: StatusChangedEvent) => void
-  ): () => void
   on(
     event: 'titleChanged',
     callback: (event: { title: string }) => void
@@ -64,17 +56,6 @@ type SessionTransportConnection = {
     event: 'deliveryRouted',
     callback: (event: DeliveryRoutedEvent) => void
   ): () => void
-}
-
-const terminalStatuses = new Set<RunRow['status']>([
-  'cancelled',
-  'completed',
-  'failed',
-  'interrupted',
-])
-
-function runError(status: RunRow['status'], error?: string) {
-  return new Error(error ?? `Session run ${status}`)
 }
 
 const createIdempotencyId = createIdGeneratorWithPrefix('request')
@@ -98,29 +79,29 @@ function getFinalUserMessage(messages: UIMessage[]): UIMessage {
 
 type StreamBridge = {
   stream: ReadableStream<UIMessageChunk>
-  setRunId(runId: string): void
-  replay(snapshot: RunSnapshot): void
+  read(runId: string, offset: Offset): void
   fail(error: unknown): void
   close(): void
   addCleanup(cleanup: () => void): void
 }
 
+export type RunStreamReader = (options: {
+  runId: string
+  offset?: Offset
+  signal?: AbortSignal
+}) => AsyncIterable<RunStreamItem>
+
 function createStreamBridge(
-  connection: SessionTransportConnection,
-  onFrame: (runId: string, seq: number) => void
+  readStream: RunStreamReader,
+  onOffset: (runId: string, offset: Offset) => void
 ): StreamBridge {
   let controller: ReadableStreamDefaultController<UIMessageChunk>
-  let runId: string | undefined
-  let replayed = false
   let settled = false
-  const seen = new Set<string>()
-  const pendingFrames: FrameEvent[] = []
-  const pendingStatuses: StatusChangedEvent[] = []
+  const readController = new AbortController()
   const extraCleanups: Array<() => void> = []
 
   const cleanup = () => {
-    unsubscribeFrame()
-    unsubscribeStatus()
+    readController.abort('stream reader detached')
     for (const cleanup of extraCleanups) cleanup()
   }
   const close = () => {
@@ -135,29 +116,6 @@ function createStreamBridge(
     cleanup()
     controller.error(error)
   }
-  const emitFrame = (frame: FrameEvent) => {
-    if (settled || frame.runId !== runId) return
-    const key = `${frame.runId}:${frame.seq}`
-    if (seen.has(key)) return
-    seen.add(key)
-    onFrame(frame.runId, frame.seq)
-    controller.enqueue(frame.chunk)
-  }
-  const emitStatus = (event: StatusChangedEvent) => {
-    if (settled || event.runId !== runId) return
-    if (
-      event.runStatus === 'completed' ||
-      event.runStatus === 'cancelled'
-    ) {
-      close()
-    } else if (
-      event.runStatus === 'failed' ||
-      event.runStatus === 'interrupted'
-    ) {
-      fail(runError(event.runStatus, event.error))
-    }
-  }
-
   const stream = new ReadableStream<UIMessageChunk>({
     start(value) {
       controller = value
@@ -170,53 +128,25 @@ function createStreamBridge(
     },
   })
 
-  const unsubscribeFrame = connection.on('frame', event => {
-    if (!replayed) pendingFrames.push(event)
-    else emitFrame(event)
-  })
-  const unsubscribeStatus = connection.on('statusChanged', event => {
-    if (!replayed) pendingStatuses.push(event)
-    else emitStatus(event)
-  })
-
   return {
     stream,
-    setRunId(value) {
-      runId = value
-    },
-    replay(snapshot) {
-      if (settled) return
-      for (const frame of snapshot.frames.toSorted(
-        (a, b) => a.seq - b.seq
-      )) {
-        emitFrame({ runId: runId ?? '', ...frame })
-      }
-      replayed = true
-      for (const frame of pendingFrames.toSorted(
-        (a, b) => a.seq - b.seq
-      )) {
-        emitFrame(frame)
-      }
-      for (const status of pendingStatuses) emitStatus(status)
-      pendingFrames.length = 0
-      pendingStatuses.length = 0
-
-      if (
-        !settled &&
-        snapshot.run &&
-        terminalStatuses.has(snapshot.run.status)
-      ) {
-        if (
-          snapshot.run.status === 'failed' ||
-          snapshot.run.status === 'interrupted'
-        ) {
-          fail(
-            runError(snapshot.run.status, snapshot.run.error ?? undefined)
-          )
-        } else {
+    read(runId, offset) {
+      void (async () => {
+        try {
+          for await (const item of readStream({
+            runId,
+            offset,
+            signal: readController.signal,
+          })) {
+            if (settled) return
+            controller.enqueue(item.chunk)
+            if (item.offset !== undefined) onOffset(runId, item.offset)
+          }
           close()
+        } catch (error) {
+          if (!settled && !readController.signal.aborted) fail(error)
         }
-      }
+      })()
     },
     fail,
     close,
@@ -239,15 +169,20 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
 {
   readonly #connection: SessionTransportConnection
   readonly #clientId: string
+  readonly #readStream: RunStreamReader
   readonly #activeBridges = new Set<StreamBridge>()
-  readonly #lastSeenSeq = new Map<string, number>()
+  readonly #lastSeenOffset = new Map<string, Offset>()
 
   constructor(
     connection: SessionConnection,
-    options: { clientId?: string } = {}
+    options: {
+      clientId?: string
+      readStream?: RunStreamReader
+    } = {}
   ) {
     this.#connection = connection
     this.#clientId = options.clientId ?? 'chat-client'
+    this.#readStream = options.readStream ?? readRunStream
   }
 
   async deliverMessage(
@@ -362,10 +297,9 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
         )
       }
       runId = result.runId
-      bridge.setRunId(runId)
 
       if (aborted) await this.#connection.cancel(runId)
-      bridge.replay(await this.#connection.streamSnapshot(runId, -1))
+      bridge.read(runId, '-1')
     } catch (error) {
       bridge.fail(error)
     }
@@ -395,12 +329,9 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
         bridge.close()
         return null
       }
-      bridge.setRunId(session.activeRunId)
-      bridge.replay(
-        await this.#connection.streamSnapshot(
-          session.activeRunId,
-          this.#lastSeenSeq.get(session.activeRunId) ?? -1
-        )
+      bridge.read(
+        session.activeRunId,
+        this.#lastSeenOffset.get(session.activeRunId) ?? '-1'
       )
       return bridge.stream
     } catch (error) {
@@ -420,10 +351,12 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   }
 
   #createBridge(): StreamBridge {
-    const bridge = createStreamBridge(this.#connection, (runId, seq) => {
-      const previous = this.#lastSeenSeq.get(runId) ?? -1
-      if (seq > previous) this.#lastSeenSeq.set(runId, seq)
-    })
+    const bridge = createStreamBridge(
+      this.#readStream,
+      (runId, offset) => {
+        this.#lastSeenOffset.set(runId, offset)
+      }
+    )
     this.#activeBridges.add(bridge)
     bridge.addCleanup(() => this.#activeBridges.delete(bridge))
     return bridge
@@ -437,9 +370,12 @@ export class DeferredSessionChatTransport<
 {
   readonly #transport: Promise<SessionChatTransport<UI_MESSAGE>>
 
-  constructor(connection: Promise<SessionConnection>) {
+  constructor(
+    connection: Promise<SessionConnection>,
+    options: ConstructorParameters<typeof SessionChatTransport>[1] = {}
+  ) {
     this.#transport = connection.then(
-      value => new SessionChatTransport<UI_MESSAGE>(value)
+      value => new SessionChatTransport<UI_MESSAGE>(value, options)
     )
   }
 

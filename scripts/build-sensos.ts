@@ -11,22 +11,26 @@ type ReleaseTarget =
 
 const targetPackages: Record<
   ReleaseTarget,
-  { engine: string; sidecar: string }
+  { engine: string; services: string; sidecar: string }
 > = {
   'darwin-arm64': {
     engine: '@rivetkit/engine-cli-darwin-arm64/rivet-engine',
+    services: '@rivet-dev/services-darwin-arm64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-arm64/agentos-sidecar',
   },
   'darwin-x64': {
     engine: '@rivetkit/engine-cli-darwin-x64/rivet-engine',
+    services: '@rivet-dev/services-darwin-x64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-x64/agentos-sidecar',
   },
   'linux-arm64': {
     engine: '@rivetkit/engine-cli-linux-arm64-musl/rivet-engine',
+    services: '@rivet-dev/services-linux-arm64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-arm64-gnu/agentos-sidecar',
   },
   'linux-x64': {
     engine: '@rivetkit/engine-cli-linux-x64-musl/rivet-engine',
+    services: '@rivet-dev/services-linux-x64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-x64-gnu/agentos-sidecar',
   },
 }
@@ -50,6 +54,7 @@ for (const asset of Object.values(nativeAssets)) {
 
 const assetPaths = {
   'rivet-engine': `node_modules/${nativeAssets.engine}`,
+  'rivet-services': `node_modules/${nativeAssets.services}`,
   'agentos-sidecar': `node_modules/${nativeAssets.sidecar}`,
   coreutils:
     'node_modules/@agentos-software/coreutils/dist/package.aospkg',
@@ -97,7 +102,12 @@ const makeNativeRuntimeBundlable: BunPlugin = {
               "import { getEnginePath } from '@rivetkit/engine-cli'",
               `import engineAsset from ${JSON.stringify(resolve(`node_modules/${nativeAssets.engine}`))} with { type: 'file' }`
             )
-            .replace('const engineAsset = getEnginePath()', ''),
+            .replace('const engineAsset = getEnginePath()', '')
+            .replace(
+              "import { getServicesPath } from '@rivet-dev/services'",
+              `import servicesAsset from ${JSON.stringify(resolve(`node_modules/${nativeAssets.services}`))} with { type: 'file' }`
+            )
+            .replace('const servicesAsset = getServicesPath()', ''),
           loader: 'ts',
         }
       }
@@ -129,6 +139,10 @@ const makeNativeRuntimeBundlable: BunPlugin = {
           .replaceAll(
             'import(["@rivetkit", "engine-cli"].join("/"))',
             'import("@rivetkit/engine-cli")'
+          )
+          .replaceAll(
+            'import(["@rivet-dev", "services"].join("/"))',
+            'import("@rivet-dev/services")'
           )
 
         if (rewritten === source) {

@@ -7,14 +7,18 @@ import {
 
 const commands = [
   { name: '/model' as const, description: 'model', run: () => undefined },
-  { name: '/exit' as const, description: 'exit', run: () => undefined },
+  {
+    name: '/switch-session' as const,
+    description: 'switch session',
+    run: () => 'switch-session' as const,
+  },
 ]
 
 describe('slash commands', () => {
   test('offers and narrows commands from a leading slash', () => {
     expect(
       matchingSlashCommands('/', commands).map(item => item.name)
-    ).toEqual(['/model', '/exit'])
+    ).toEqual(['/model', '/switch-session'])
     expect(
       matchingSlashCommands('/m', commands).map(item => item.name)
     ).toEqual(['/model'])
@@ -27,7 +31,14 @@ describe('slash commands', () => {
   })
 
   test('separates stream controls from delivered messages', () => {
-    expect(parseStreamingInput('/exit')).toEqual({ type: 'exit' })
+    expect(parseStreamingInput('/switch-session')).toEqual({
+      type: 'switch-session',
+    })
+    expect(parseStreamingInput('/exit')).toEqual({
+      type: 'delivery',
+      prompt: '/exit',
+      priority: 'adaptive',
+    })
     expect(parseStreamingInput('/STOP')).toEqual({ type: 'stop' })
     expect(parseStreamingInput('/interrupt change course')).toEqual({
       type: 'delivery',

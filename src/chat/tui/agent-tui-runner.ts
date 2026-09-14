@@ -267,7 +267,6 @@ export class AgentTUIRunner {
               if (isInterruptedError(error)) {
                 return 'exit'
               }
-
               throw error
             }
 
@@ -428,7 +427,6 @@ export class AgentTUIRunner {
           ) {
             return 'switch-session'
           }
-
           throw error
         } finally {
           rendererSuspended = false

@@ -36,6 +36,10 @@ import {
   releaseRuntimeActivity,
   runtimeActivityKey,
 } from '@/runtime/activity'
+import {
+  appendRunStreamChunk,
+  closeRunStream,
+} from '@/runtime/durable-run-stream'
 
 const terminalStatuses = new Set([
   'cancelled',
@@ -126,13 +130,26 @@ export async function executeRun(
 
       let sequence = 0
       const publishFrame = async (chunk: UIMessageChunk) => {
-        await appendRunFrame(step.db, run.id, sequence, chunk)
+        const frameSequence = sequence
+        await appendRunFrame(step.db, run.id, frameSequence, chunk)
+        sequence += 1
+        await appendRunStreamChunk(run.id, frameSequence, chunk)
         step.broadcast('frame', {
           runId: run.id,
-          seq: sequence,
+          seq: frameSequence,
           chunk,
         })
-        sequence += 1
+      }
+      const closeOutput = async (chunk: UIMessageChunk) => {
+        try {
+          await closeRunStream(run.id, chunk)
+        } catch (error) {
+          step.log.warn({
+            msg: 'durable run stream close failed',
+            runId: run.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
       const publishStatus = (
         runStatus: Parameters<typeof toChatStatus>[0],
@@ -156,6 +173,7 @@ export async function executeRun(
           sequence,
           chunk,
         })
+        await closeOutput(chunk)
         step.broadcast('frame', {
           runId: run.id,
           seq: sequence,
@@ -301,7 +319,7 @@ export async function executeRun(
         publishStatus('running')
 
         const { responseMessage, stepMetadata, endState } =
-          await step.keepAwake(consumeRunStream())
+          await consumeRunStream()
 
         acceptingInterrupts = false
 
@@ -337,6 +355,8 @@ export async function executeRun(
           totalUsage: aggregateUsage(stepMetadata),
           responseMetadata: stepMetadata.at(-1)?.response,
         })
+
+        await closeOutput(terminalChunk)
 
         // finalizeRun commits the assistant message and terminal frame in one
         // transaction. Only publish the finish after that transaction lands.
@@ -391,6 +411,7 @@ export async function executeRun(
                   : undefined,
           error: status === 'failed' ? failure : undefined,
         })
+        await closeOutput(chunk)
         step.broadcast('frame', {
           runId: run.id,
           seq: sequence,

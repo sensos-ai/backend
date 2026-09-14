@@ -53,7 +53,7 @@ function pendingStream() {
 }
 
 describe('TerminalRenderer stream controls', () => {
-  test('/exit detaches locally and never delivers a message', async () => {
+  test('/switch-session detaches locally without cancelling the run', async () => {
     const input = new FakeInput()
     const output = new FakeOutput()
     const source = pendingStream()
@@ -83,14 +83,44 @@ describe('TerminalRenderer stream controls', () => {
     )
 
     await Promise.resolve()
-    input.emit('data', Buffer.from('/exit'))
+    input.emit('data', Buffer.from('/switch-session'))
     input.emit('data', Buffer.from('\r'))
 
-    expect(rendered).rejects.toThrow('Interrupted')
+    await expect(rendered).rejects.toMatchObject({
+      name: 'SwitchSessionError',
+    })
     await rendered.catch(() => undefined)
     expect(detached).toBe(true)
     expect(aborted).toBe(false)
     expect(deliveries).toEqual([])
+  })
+
+  test('streaming Ctrl-C cancels the run and returns control', async () => {
+    const input = new FakeInput()
+    const output = new FakeOutput()
+    const source = pendingStream()
+    let aborted = 0
+    const renderer = new TerminalRenderer({ input, output })
+    const rendered = renderer.renderStream(
+      {
+        uiMessageStream: source.stream,
+        abort() {
+          aborted += 1
+          source.abort()
+        },
+      },
+      {
+        continueSession: true,
+        waitForExit: false,
+        onSubmitDuringStream: async () => {},
+      }
+    )
+
+    await Promise.resolve()
+    input.emit('data', Buffer.from('\x03'))
+
+    await expect(rendered).rejects.toThrow('Interrupted')
+    expect(aborted).toBe(1)
   })
 
   test('/stop invokes explicit cancellation and sends no message', async () => {

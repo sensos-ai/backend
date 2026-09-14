@@ -25,6 +25,7 @@ import {
   retainRuntimeActivity,
   runtimeActivityKey,
 } from '@/runtime/activity'
+import { ensureRunStream } from '@/runtime/durable-run-stream'
 
 const createMessageId = createIdGeneratorWithPrefix('msg')
 const createRunId = createIdGeneratorWithPrefix('run')
@@ -68,6 +69,8 @@ export async function submitRun(
       message: queued.body.message,
       assistantMessageId: createMessageId(),
     })
+
+    await ensureRunStream(result.run.id)
 
     if (result.created) {
       const catalog = configuredSessionCatalog()

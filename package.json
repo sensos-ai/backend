@@ -28,13 +28,15 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.80",
+    "@durable-streams/client": "^0.2.7",
     "@inquirer/prompts": "^8.7.2",
     "@rivet-dev/agentos": "^0.2.19",
+    "@rivet-dev/services": "^0.1.7",
     "ai": "^7.0.97",
     "drizzle-orm": "0.45.2",
     "hono": "^4.12.28",
     "nanoevents": "^10.0.0",
-    "rivetkit": "^2.3.10",
+    "rivetkit": "^2.3.12",
     "zod": "^4.6.1"
   },
   "devDependencies": {

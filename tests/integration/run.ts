@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getServicesPath } from '@rivet-dev/services'
 import { getEnginePath } from '@rivetkit/engine-cli'
 
 const HOST = '127.0.0.1'
@@ -57,6 +58,30 @@ async function waitForEngine(
   )
 }
 
+async function waitForServices(
+  services: Bun.Subprocess,
+  endpoint: string
+): Promise<void> {
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (services.exitCode !== null) {
+      throw new Error(
+        `Rivet Services exited during startup with code ${services.exitCode}`
+      )
+    }
+    try {
+      await fetch(endpoint)
+      return
+    } catch {
+      // Rivet Services has not bound its endpoint yet.
+    }
+    await Bun.sleep(50)
+  }
+  throw new Error(
+    `Rivet Services was not ready within ${READY_TIMEOUT_MS}ms`
+  )
+}
+
 async function stopProcess(process: Bun.Subprocess | undefined) {
   if (!process || process.exitCode !== null) return
   process.kill('SIGTERM')
@@ -73,9 +98,12 @@ const storageRoot = await mkdtemp(join(tmpdir(), 'sensos-integration-'))
 const controlPlaneRoot = join(storageRoot, 'control-plane')
 await mkdir(controlPlaneRoot, { recursive: true })
 
-const probes = [reservePort(), reservePort(), reservePort()]
-const [guardPort, peerPort, metricsPort] = probes.map(probe => probe.port)
+const probes = [reservePort(), reservePort(), reservePort(), reservePort()]
+const [guardPort, peerPort, metricsPort, streamsPort] = probes.map(
+  probe => probe.port
+)
 const endpoint = `http://${HOST}:${guardPort}`
+const streamsEndpoint = `http://${HOST}:${streamsPort}`
 const runId = crypto.randomUUID()
 for (const probe of probes) probe.stop(true)
 
@@ -95,6 +123,7 @@ const env = {
   RIVETKIT_STORAGE_PATH: storageRoot,
   RIVET_RUN_ENGINE: '0',
   RIVET_TEST_ENDPOINT: endpoint,
+  RIVET_TEST_STREAMS_ENDPOINT: streamsEndpoint,
   RIVET_TEST_RUN_ID: runId,
   // A local engine bootstraps only its default namespace. The command's
   // unique storage root makes this namespace instance exclusive to this run.
@@ -103,15 +132,19 @@ const env = {
 }
 
 let engine: Bun.Subprocess | undefined
+let services: Bun.Subprocess | undefined
 let tests: Bun.Subprocess | undefined
 let engineStdout = Promise.resolve('')
 let engineStderr = Promise.resolve('')
+let servicesStdout = Promise.resolve('')
+let servicesStderr = Promise.resolve('')
 let exitCode = 1
 let interrupted = false
 
 const interrupt = () => {
   interrupted = true
   tests?.kill('SIGTERM')
+  services?.kill('SIGTERM')
   engine?.kill('SIGTERM')
 }
 process.once('SIGINT', interrupt)
@@ -136,6 +169,29 @@ try {
   engineStderr = capture(engine.stderr)
   await waitForEngine(engine, endpoint)
 
+  services = Bun.spawn([getServicesPath(), 'start'], {
+    env: {
+      ...env,
+      RIVET_ENDPOINT: endpoint,
+      HOST,
+      PORT: String(streamsPort),
+    },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  if (
+    !services.stdout ||
+    typeof services.stdout === 'number' ||
+    !services.stderr ||
+    typeof services.stderr === 'number'
+  ) {
+    throw new Error('Rivet Services diagnostics were not piped')
+  }
+  servicesStdout = capture(services.stdout)
+  servicesStderr = capture(services.stderr)
+  await waitForServices(services, streamsEndpoint)
+
   tests = Bun.spawn(
     ['bun', 'test', '--no-orphans', '--parallel=4', 'tests/integration'],
     {
@@ -152,12 +208,22 @@ try {
   process.off('SIGINT', interrupt)
   process.off('SIGTERM', interrupt)
   await stopProcess(tests)
+  await stopProcess(services)
   await stopProcess(engine)
 
-  const [stdout, stderr] = await Promise.all([engineStdout, engineStderr])
+  const [stdout, stderr, streamStdout, streamStderr] = await Promise.all([
+    engineStdout,
+    engineStderr,
+    servicesStdout,
+    servicesStderr,
+  ])
   if (exitCode !== 0) {
     if (stdout.trim()) console.error('Rivet engine stdout:\n', stdout)
     if (stderr.trim()) console.error('Rivet engine stderr:\n', stderr)
+    if (streamStdout.trim())
+      console.error('Rivet Services stdout:\n', streamStdout)
+    if (streamStderr.trim())
+      console.error('Rivet Services stderr:\n', streamStderr)
   }
 
   await rm(storageRoot, { recursive: true, force: true })

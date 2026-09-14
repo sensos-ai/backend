@@ -5,12 +5,9 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import { prepareAgentOsAssets } from './agentos-assets'
-import {
-  onRuntimeActivityChange,
-  runtimeActivityCount,
-} from './activity'
+import { onRuntimeActivityChange, runtimeActivityCount } from './activity'
 import { registry } from './actors/registry'
-import { prepareRivetEngine } from './assets'
+import { prepareRivetEngine, prepareRivetServices } from './assets'
 import {
   DEFAULT_IDLE_TTL_MS,
   HEARTBEAT_INTERVAL_MS,
@@ -20,6 +17,8 @@ import {
   RUNTIME_ENDPOINT,
   RUNTIME_HOST,
   RUNTIME_PORT,
+  RUNTIME_STREAMS_ENDPOINT,
+  RUNTIME_STREAMS_PORT,
   RUNTIME_PROTOCOL_VERSION,
 } from './constants'
 
@@ -83,6 +82,16 @@ export function resolveRuntimeIdleTtl(value: string | undefined): number {
   return ttl
 }
 
+export function shouldDeferRuntimeIdleShutdown(input: {
+  leaseCount: number
+  activityCount: number
+  shuttingDown: boolean
+}): boolean {
+  return (
+    input.leaseCount > 0 || input.activityCount > 0 || input.shuttingDown
+  )
+}
+
 function runtimePaths(root: string): RuntimePaths {
   const directory = join(root, 'runtime', 'supervisor')
   return {
@@ -140,13 +149,34 @@ async function waitForEngine(engine: Bun.Subprocess): Promise<void> {
   )
 }
 
-async function stopOwnedEngine(engine: Bun.Subprocess): Promise<void> {
-  if (engine.exitCode !== null) return
-  engine.kill('SIGTERM')
-  await Promise.race([engine.exited, Bun.sleep(5_000)])
-  if (engine.exitCode === null) {
-    engine.kill('SIGKILL')
-    await engine.exited
+async function waitForServices(services: Bun.Subprocess): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    if (services.exitCode !== null) {
+      throw new Error('Local Rivet Services exited during startup')
+    }
+    try {
+      await fetch(RUNTIME_STREAMS_ENDPOINT)
+      return
+    } catch {
+      // Rivet Services has not bound its local endpoint yet.
+    }
+    await Bun.sleep(50)
+  }
+  throw new Error(
+    'Local Rivet Services did not become ready within 10 seconds'
+  )
+}
+
+async function stopOwnedProcess(
+  child: Bun.Subprocess | undefined
+): Promise<void> {
+  if (!child || child.exitCode !== null) return
+  child.kill('SIGTERM')
+  await Promise.race([child.exited, Bun.sleep(5_000)])
+  if (child.exitCode === null) {
+    child.kill('SIGKILL')
+    await child.exited
   }
 }
 
@@ -425,15 +455,34 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
   )
 
   const agentOsReady = prepareAgentOsAssets(root)
-  const enginePath = await prepareRivetEngine(root)
+  const [enginePath, servicesPath] = await Promise.all([
+    prepareRivetEngine(root),
+    prepareRivetServices(root),
+  ])
   process.env.RIVET_ENGINE_BINARY = enginePath
+  process.env.RIVET_SERVICES_BINARY = servicesPath
   const engine = Bun.spawn([enginePath, 'start'], {
     env: engineEnvironment(root),
     stdin: 'ignore',
     stdout: 'ignore',
     stderr: 'inherit',
   })
-  const ready = Promise.all([waitForEngine(engine), agentOsReady]).then(
+  let services: Bun.Subprocess | undefined
+  const servicesReady = waitForEngine(engine).then(async () => {
+    services = Bun.spawn([servicesPath, 'start'], {
+      env: {
+        ...process.env,
+        RIVET_ENDPOINT: RUNTIME_ENDPOINT,
+        HOST: RUNTIME_HOST,
+        PORT: String(RUNTIME_STREAMS_PORT),
+      },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'inherit',
+    })
+    await waitForServices(services)
+  })
+  const ready = Promise.all([servicesReady, agentOsReady]).then(
     async () => {
       await registry.startAndWait()
     }
@@ -454,15 +503,23 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
     await Promise.race([registry.shutdown(), Bun.sleep(6_000)]).catch(
       () => undefined
     )
-    await stopOwnedEngine(engine)
+    await stopOwnedProcess(services)
+    await stopOwnedProcess(engine)
     await rm(paths.socket, { force: true })
     await rm(paths.state, { force: true })
     process.exit(0)
   }
 
   const scheduleIdleShutdown = () => {
-    if (leases.size > 0 || runtimeActivityCount() > 0 || shuttingDown)
+    if (
+      shouldDeferRuntimeIdleShutdown({
+        leaseCount: leases.size,
+        activityCount: runtimeActivityCount(),
+        shuttingDown,
+      })
+    ) {
       return
+    }
     if (idleTimer) return
     idleTimer = setTimeout(() => {
       idleTimer = undefined

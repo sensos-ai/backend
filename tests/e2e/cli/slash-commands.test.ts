@@ -95,7 +95,7 @@ test('/interrupt cancels the active provider request and completes a successor r
       )
     )
     expect(texts).toContain('successor completed')
-    await cli.sendLine('/exit')
+    await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)
     cli.gateway.assertConsumed()
   } finally {
@@ -144,7 +144,7 @@ test('/queue defers one message until the active run completes', async () => {
       )
     ).toHaveLength(1)
     expect(cli.gateway.requests).toHaveLength(2)
-    await cli.sendLine('/exit')
+    await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)
     cli.gateway.assertConsumed()
   } finally {
@@ -204,7 +204,7 @@ test('/stop cancels without a successor and leaves the composer usable', async (
         timeoutMs: 20_000,
       }
     )
-    await cli.sendLine('/exit')
+    await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)
     cli.gateway.assertConsumed()
   } finally {

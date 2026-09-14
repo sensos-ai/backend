@@ -82,10 +82,23 @@ test('actor stream advances while disconnected and replays on reconnect', async 
   })
   await firstConnection.dispose()
 
+  await Bun.sleep(250)
+
   const resumedConnection = handle.connect({
     clientId: actorKey('client'),
   })
   cleanup(() => resumedConnection.dispose())
+  const persistedWhileDisconnected =
+    (await resumedConnection.streamSnapshot(
+      runId,
+      frameBeforeDisconnect.seq
+    )) as { frames: Array<Pick<FrameEvent, 'seq' | 'chunk'>> }
+  expect(persistedWhileDisconnected.frames.length).toBeGreaterThan(0)
+  expect(
+    persistedWhileDisconnected.frames.every(
+      frame => frame.seq > frameBeforeDisconnect.seq
+    )
+  ).toBe(true)
   const advancedAfterDisconnect = waitForEvent<FrameEvent>(
     listener => resumedConnection.on('frame', listener),
     event =>
@@ -111,6 +124,12 @@ test('actor stream advances while disconnected and replays on reconnect', async 
     id: runId,
     status: 'completed',
   })
+  const completedFrames = (
+    await resumedConnection.streamSnapshot(runId, -1)
+  ).frames as Array<Pick<FrameEvent, 'seq' | 'chunk'>>
+  expect(completedFrames.map(frame => frame.seq)).toEqual(
+    completedFrames.map((_, index) => index)
+  )
 
   const queuedRunId = (await queuedStarted).runId
   if (!queuedRunId) throw new Error('Missing queued run id')
@@ -150,10 +169,20 @@ test('transport stop cancels the active actor run and persists its cutoff', asyn
     event => event.chunk.type === 'text-delta',
     { description: 'stoppable run output' }
   )
+  const failedOutput = waitForEvent<StatusChangedEvent>(
+    listener => connection.on('statusChanged', listener),
+    event => event.runStatus === 'failed',
+    { description: 'stoppable run failure' }
+  )
   await connection.deliver(delivery)
   const runId = (await started).runId
   if (!runId) throw new Error('Missing stoppable run id')
-  await partialOutput
+  await Promise.race([
+    partialOutput,
+    failedOutput.then(event => {
+      throw new Error(event.error ?? 'Stoppable run failed')
+    }),
+  ])
 
   const cancelled = waitForEvent<StatusChangedEvent>(
     listener => connection.on('statusChanged', listener),

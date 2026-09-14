@@ -71,7 +71,7 @@ test('provider error after emitted chunks preserves output and fails without can
     expect(snapshot.messages.map(messageText)).toContain(
       'useful output before provider failure'
     )
-    await cli.sendLine('/exit')
+    await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)
     cli.gateway.assertConsumed()
   } finally {
@@ -120,7 +120,7 @@ test('stream ending without a finish chunk is an actionable failure, not an abor
     expect(snapshot.messages.map(messageText)).toContain(
       'output before malformed termination'
     )
-    await cli.sendLine('/exit')
+    await cli.sendControlC()
     expect(await cli.waitForExit()).toBe(0)
     cli.gateway.assertConsumed()
   } finally {

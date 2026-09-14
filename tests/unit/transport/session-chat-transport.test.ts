@@ -1,16 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
-import type {
-  DeliveryRoutedEvent,
-  FrameEvent,
-  StatusChangedEvent,
-} from '@/runtime/actors/session/config'
-import type { RunRow, RunStatus } from '@/runtime/actors/session/db'
+import type { DeliveryRoutedEvent } from '@/runtime/actors/session/config'
 import {
   DeferredSessionChatTransport,
   SessionChatTransport,
   type SessionConnection,
 } from '@/chat/transport/session-chat-transport'
+import type { RunStreamItem } from '@/runtime/durable-run-stream'
 
 const userMessage: UIMessage = {
   id: 'message-1',
@@ -23,41 +19,16 @@ const finishChunk: UIMessageChunk = {
   finishReason: 'stop',
 }
 
-function run(status: RunStatus, error: string | null = null): RunRow {
-  return {
-    id: 'run-1',
-    idempotencyId: 'request-1',
-    model: 'openai/gpt-5.6-sol',
-    steps: null,
-    totalUsage: null,
-    responseMetadata: null,
-    userMessageId: userMessage.id,
-    assistantMessageId: 'message-2',
-    status,
-    finishReason: status === 'completed' ? 'stop' : null,
-    error,
-    createdAt: new Date(),
-    startedAt: new Date(),
-    finishedAt: status === 'running' ? null : new Date(),
-  }
-}
-
 class FakeConnection {
-  frameListeners = new Set<(event: FrameEvent) => void>()
-  statusListeners = new Set<(event: StatusChangedEvent) => void>()
   deliveryListeners = new Set<(event: DeliveryRoutedEvent) => void>()
   cancelled: string[] = []
   sent: unknown[] = []
   activeRunId: string | undefined
-  snapshot = {
-    run: run('completed'),
-    frames: [{ seq: 0, chunk: finishChunk }],
-  }
   sendImplementation: () => Promise<{
     accepted: boolean
     deduplicated: boolean
     runId: string
-    status: RunStatus
+    status: 'queued'
   }> = async () => ({
     accepted: true,
     deduplicated: false,
@@ -66,20 +37,11 @@ class FakeConnection {
   })
 
   on(
-    event: 'frame' | 'statusChanged' | 'deliveryRouted',
-    callback:
-      | ((event: FrameEvent) => void)
-      | ((event: StatusChangedEvent) => void)
-      | ((event: DeliveryRoutedEvent) => void)
+    _event: 'deliveryRouted',
+    callback: (event: DeliveryRoutedEvent) => void
   ) {
-    const listeners =
-      event === 'frame'
-        ? this.frameListeners
-        : event === 'statusChanged'
-          ? this.statusListeners
-          : this.deliveryListeners
-    listeners.add(callback as never)
-    return () => listeners.delete(callback as never)
+    this.deliveryListeners.add(callback)
+    return () => this.deliveryListeners.delete(callback)
   }
 
   async send(name: string, input: unknown, options: unknown) {
@@ -139,25 +101,28 @@ class FakeConnection {
     }
   }
 
-  async streamSnapshot() {
-    return this.snapshot
-  }
-
-  emitFrame(event: FrameEvent) {
-    for (const listener of this.frameListeners) listener(event)
-  }
-
-  emitStatus(event: StatusChangedEvent) {
-    for (const listener of this.statusListeners) listener(event)
-  }
-
   emitDelivery(event: DeliveryRoutedEvent) {
     for (const listener of this.deliveryListeners) listener(event)
   }
 }
 
-function transport(fake: FakeConnection) {
-  return new SessionChatTransport(fake as unknown as SessionConnection)
+class FakeRunStreams {
+  calls: Array<{ runId: string; offset?: string }> = []
+  reads: RunStreamItem[][] = [[{ chunk: finishChunk, offset: '0' }]]
+
+  read = async function* (
+    this: FakeRunStreams,
+    options: { runId: string; offset?: string; signal?: AbortSignal }
+  ) {
+    this.calls.push({ runId: options.runId, offset: options.offset })
+    for (const item of this.reads.shift() ?? []) yield item
+  }.bind(this)
+}
+
+function transport(fake: FakeConnection, streams = new FakeRunStreams()) {
+  return new SessionChatTransport(fake as unknown as SessionConnection, {
+    readStream: streams.read,
+  })
 }
 
 async function chunks(stream: ReadableStream<UIMessageChunk>) {
@@ -173,7 +138,10 @@ describe('SessionChatTransport', () => {
     const connection = new Promise<SessionConnection>(resolve => {
       resolveConnection = resolve
     })
-    const deferred = new DeferredSessionChatTransport(connection)
+    const streams = new FakeRunStreams()
+    const deferred = new DeferredSessionChatTransport(connection, {
+      readStream: streams.read,
+    })
     const submitted = deferred.sendMessages({
       trigger: 'submit-message',
       chatId: 'chat_one',
@@ -243,48 +211,80 @@ describe('SessionChatTransport', () => {
     })
   })
 
-  test('deduplicates frames received during snapshot replay', async () => {
-    const fake = new FakeConnection()
-    fake.streamSnapshot = async () => {
-      fake.emitFrame({ runId: 'run-1', seq: 0, chunk: finishChunk })
-      return fake.snapshot
-    }
-
-    const stream = await transport(fake).sendMessages({
-      trigger: 'submit-message',
-      chatId: 'session-1',
-      messageId: undefined,
-      messages: [userMessage],
-      abortSignal: undefined,
-    })
-
-    expect(await chunks(stream)).toEqual([finishChunk])
-  })
-
-  test('reconnects to the active run from its durable snapshot', async () => {
+  test('reconnects to the active run from the start of its durable stream', async () => {
     const fake = new FakeConnection()
     fake.activeRunId = 'run-1'
-    const stream = await transport(fake).reconnectToStream({
+    const streams = new FakeRunStreams()
+    const stream = await transport(fake, streams).reconnectToStream({
       chatId: 'session-1',
     })
 
     expect(stream).not.toBeNull()
     if (!stream) throw new Error('Expected an active stream')
     expect(await chunks(stream)).toEqual([finishChunk])
+    expect(streams.calls).toEqual([{ runId: 'run-1', offset: '-1' }])
+  })
+
+  test('reconnects from the last durable stream offset', async () => {
+    const fake = new FakeConnection()
+    fake.activeRunId = 'run-1'
+    const streams = new FakeRunStreams()
+    streams.reads = [
+      [
+        {
+          chunk: { type: 'text-start', id: 'text-1' },
+          offset: 'offset-1',
+        },
+      ],
+      [
+        {
+          chunk: {
+            type: 'text-delta',
+            id: 'text-1',
+            delta: 'continued',
+          },
+          offset: 'offset-2',
+        },
+        { chunk: finishChunk, offset: 'offset-3' },
+      ],
+    ]
+    const value = transport(fake, streams)
+    const initial = await value.reconnectToStream({ chatId: 'session-1' })
+    expect(initial).not.toBeNull()
+    if (!initial) throw new Error('Expected an initial stream')
+    const initialReader = initial.getReader()
+    expect((await initialReader.read()).value).toEqual({
+      type: 'text-start',
+      id: 'text-1',
+    })
+    value.detachActiveStreams()
+    expect((await initialReader.read()).done).toBe(true)
+
+    const resumed = await value.reconnectToStream({ chatId: 'session-1' })
+    expect(resumed).not.toBeNull()
+    if (!resumed) throw new Error('Expected a resumed stream')
+    expect(await chunks(resumed)).toEqual([
+      { type: 'text-delta', id: 'text-1', delta: 'continued' },
+      finishChunk,
+    ])
+    expect(streams.calls).toEqual([
+      { runId: 'run-1', offset: '-1' },
+      { runId: 'run-1', offset: 'offset-1' },
+    ])
   })
 
   test('detaches a stream reader without cancelling the actor run', async () => {
     const fake = new FakeConnection()
-    fake.snapshot = {
-      run: run('running'),
-      frames: [
+    const streams = new FakeRunStreams()
+    streams.reads = [
+      [
         {
-          seq: 0,
           chunk: { type: 'text-start', id: 'text-1' },
+          offset: 'offset-1',
         },
       ],
-    }
-    const value = transport(fake)
+    ]
+    const value = transport(fake, streams)
     const stream = await value.sendMessages({
       trigger: 'submit-message',
       chatId: 'session-1',
@@ -293,11 +293,14 @@ describe('SessionChatTransport', () => {
       abortSignal: undefined,
     })
 
+    const reader = stream.getReader()
+    expect((await reader.read()).value).toEqual({
+      type: 'text-start',
+      id: 'text-1',
+    })
     value.detachActiveStreams()
 
-    expect(await chunks(stream)).toEqual([
-      { type: 'text-start', id: 'text-1' },
-    ])
+    expect((await reader.read()).done).toBe(true)
     expect(fake.cancelled).toEqual([])
   })
 
@@ -343,10 +346,14 @@ describe('SessionChatTransport', () => {
     expect(fake.cancelled).toEqual(['run-1'])
   })
 
-  test('errors the stream for a failed terminal run', async () => {
+  test('errors the stream when durable replay fails', async () => {
     const fake = new FakeConnection()
-    fake.snapshot = { run: run('failed', 'model failed'), frames: [] }
-    const stream = await transport(fake).sendMessages({
+    const streams = new FakeRunStreams()
+    streams.read = async function* () {
+      yield* [] as RunStreamItem[]
+      throw new Error('durable stream failed')
+    }
+    const stream = await transport(fake, streams).sendMessages({
       trigger: 'submit-message',
       chatId: 'session-1',
       messageId: undefined,
@@ -354,7 +361,7 @@ describe('SessionChatTransport', () => {
       abortSignal: undefined,
     })
 
-    expect(chunks(stream)).rejects.toThrow('model failed')
+    expect(chunks(stream)).rejects.toThrow('durable stream failed')
   })
 
   test('rejects regeneration without submitting a run', async () => {
