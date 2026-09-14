@@ -134,4 +134,53 @@ describe('scripted model', () => {
       'did not consume required turn 0'
     )
   })
+
+  test('supports tool-result predicates, provider failures, and incomplete streams', async () => {
+    const scripted = createScriptedLanguageModel({
+      name: 'edge sequences',
+      turns: [
+        {
+          expect: {
+            toolResult: { toolCallId: 'call-1', toolName: 'bash' },
+          },
+          chunks: [
+            { type: 'text-start', id: 'partial' },
+            { type: 'text-delta', id: 'partial', delta: 'before failure' },
+            { type: 'throw', message: 'provider disconnected' },
+          ],
+        },
+        {
+          chunks: [
+            { type: 'text-start', id: 'incomplete' },
+            {
+              type: 'text-delta',
+              id: 'incomplete',
+              delta: 'no terminal chunk',
+            },
+          ],
+        },
+      ],
+    })
+    const toolRequest: LanguageModelV4CallOptions = {
+      prompt: [
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              output: { type: 'text', value: 'ok' },
+            },
+          ],
+        },
+      ],
+    }
+    await expect(chunks(scripted.model, toolRequest)).rejects.toThrow(
+      'provider disconnected'
+    )
+    const incomplete = await chunks(scripted.model, request('next'))
+    expect(incomplete.at(-1)).toMatchObject({ type: 'text-delta' })
+    scripted.controller.assertConsumed()
+  })
 })

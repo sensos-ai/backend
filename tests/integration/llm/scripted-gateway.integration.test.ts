@@ -108,4 +108,35 @@ describe('scripted gateway', () => {
       })
     ).rejects.toThrow('turn 0 expected prompt containing')
   })
+
+  test('stops idempotently while a stream is held', async () => {
+    const gateway = startScriptedGateway({
+      name: 'cleanup held gateway',
+      turns: [
+        {
+          chunks: [
+            { type: 'text-start', id: 'held' },
+            { type: 'hold', gate: 'never' },
+          ],
+        },
+      ],
+    })
+    running.push(gateway)
+    const provider = createGateway({
+      baseURL: gateway.url,
+      apiKey: 'test-key',
+    })
+    const result = await provider('openai/test-model').doStream({
+      prompt: [],
+    })
+    const reader = result.stream.getReader()
+    expect((await reader.read()).value).toMatchObject({
+      type: 'text-start',
+    })
+    const pending = reader.read()
+    await gateway.waitForRequest()
+    await gateway.stop()
+    await gateway.stop()
+    await expect(pending).rejects.toThrow()
+  })
 })
