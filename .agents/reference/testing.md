@@ -95,6 +95,39 @@ Keep CI simple during rapid pre-launch development: it should exercise the
 same deterministic commands, reject empty required suites, and retain useful
 failure diagnostics.
 
+## Gotchas
+
+### Bun orphan policy crosses subprocess boundaries
+
+`bun test --no-orphans` exports `BUN_FEATURE_FLAG_NO_ORPHANS` to descendants.
+If a compiled CLI E2E passes that variable into the product process, Bun may
+kill the detached runtime supervisor when the CLI process dies. That makes a
+valid client-detachment journey look like a runtime durability failure.
+
+Keep `--no-orphans` on the test runner, but remove
+`BUN_FEATURE_FLAG_NO_ORPHANS` from the environment passed to the product
+subprocess. The E2E harness already does this. Continue to own and stop the
+runtime explicitly in test cleanup; removing the inherited flag is not
+permission to leave processes behind.
+
+Hard-disconnect journeys kill the exact CLI PID. Killing its process group can
+also kill the detached supervisor and tests a different contract.
+
+### Durable Streams require Rivet Services
+
+The local Rivet engine does not serve `/durable-streams/v1/stream/`. Integration
+tests that exercise run output must start both the engine and Rivet Services,
+give each command isolated ports and storage, set
+`RIVET_TEST_STREAMS_ENDPOINT`, and clean up both processes. A 404 from the
+engine endpoint is an infrastructure wiring error, not a missing run stream.
+
+### Durable offsets checkpoint batches
+
+A Durable Streams offset identifies an HTTP batch, not an individual JSON item.
+Test doubles must attach the new offset only to the final item delivered from a
+batch. Advancing it after an earlier item can skip the remainder of that batch
+when a reader detaches and reconnects.
+
 ## Scripts, pruning, and diagnostics
 
 Test lifecycle stays under `tests`. Code under `scripts/` is appropriate only
