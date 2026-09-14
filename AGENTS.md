@@ -15,6 +15,8 @@ changing or running tests, fixtures, helpers, runners, or test infrastructure.
 
 The detached runtime can remain active after the CLI exits. The CLI compares the protocol version and build ID before it reuses that runtime. This check prevents the CLI from using stale runtime code.
 
+Read [`.agents/reference/durable-runs.md`](.agents/reference/durable-runs.md) before changing run execution, runtime activity ownership, stream persistence or replay, cancellation, or CLI session attachment and switching.
+
 - Change `SENSOS_RUNTIME_PROTOCOL_VERSION` in `.env` and `.env.example` when the CLI-to-runtime request or response schema changes. Use the next integer.
 - Keep the protocol version unchanged for source changes that do not change this wire contract.
 - Do not set the build ID by hand. Development computes it from runtime source files. `bun run build` adds it to the compiled CLI.
