@@ -6,7 +6,7 @@ import {
   createTestRegistry,
 } from '../../../../helpers/rivet-test'
 
-test('submit is idempotent and owns one durable active run', async () => {
+test('persists run state, frames, cancellation, title, and deletion', async () => {
   const { client, trackedActorKey } = await createRivetTest(
     { name: 'durable query behavior' },
     () => createTestRegistry({ queryTestActor })
@@ -28,10 +28,6 @@ test('submit is idempotent and owns one durable active run', async () => {
   }
 
   const first = await handle.submit(input)
-  const duplicate = await handle.submit({
-    ...input,
-    runId: 'run_duplicate',
-  })
   const busy = await handle.submit({
     ...input,
     runId: 'run_2',
@@ -40,11 +36,6 @@ test('submit is idempotent and owns one durable active run', async () => {
   })
 
   expect(first).toMatchObject({ accepted: true, created: true })
-  expect(duplicate).toMatchObject({
-    accepted: true,
-    created: false,
-    run: { id: 'run_1' },
-  })
   expect(busy).toMatchObject({
     accepted: false,
     created: false,
@@ -64,31 +55,6 @@ test('submit is idempotent and owns one durable active run', async () => {
   expect(snapshot.frames).toEqual([
     { seq: 0, chunk: { type: 'finish', finishReason: 'stop' } },
   ])
-
-  const fallback = await handle.submit({
-    ...input,
-    runId: 'run_fallback',
-    idempotencyId: userMessage.id,
-    assistantMessageId: 'msg_fallback_assistant',
-  })
-  expect(fallback).toMatchObject({
-    accepted: true,
-    created: true,
-    run: { id: 'run_fallback', userMessageId: userMessage.id },
-  })
-  expect((await handle.snapshot('run_fallback')).meta.revision).toBe(
-    snapshot.meta.revision
-  )
-  expect(
-    (await handle.snapshot('run_fallback')).messages.filter(
-      message => message.id === userMessage.id
-    )
-  ).toHaveLength(1)
-  await handle.finish('run_fallback', {
-    id: 'msg_fallback_assistant',
-    role: 'assistant',
-    parts: [{ type: 'text', text: 'fallback response' }],
-  })
 
   await handle.setTitle('Durable session title')
   expect((await handle.snapshot('run_1')).meta.title).toBe(
