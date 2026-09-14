@@ -273,9 +273,101 @@ export function decideInboxRoute(input: {
 }
 ```
 
-The effectful `processInbox` must apply this decision and preserve the current
-fallback: when an apparently active run refuses steering, queue the message and
-publish `queued` rather than losing it.
+The effectful `processInbox` applies the decision. Keep actor access in this
+thin imperative shell and keep the policy function above free of RivetKit:
+
+```ts
+export async function processInbox(
+  context: SessionWorkflowContext
+): Promise<{ kind: 'inbox' }> {
+  const queued = await context.queue.next('next-inbox', {
+    names: ['inbox'],
+  })
+  const inboxMessage = queued.body
+
+  await context.step('route-inbox', async step => {
+    if (await messageExists(step.db, inboxMessage.message.id)) return
+
+    const activeRun = step.vars.activeRun
+    const waitingForHumanInput =
+      inboxMessage.priority === 'now' && !activeRun
+        ? isWaitingForHumanInput(await listMessages(step.db))
+        : false
+    const decision = decideInboxRoute({
+      priority: inboxMessage.priority,
+      hasActiveRun: activeRun !== undefined,
+      waitingForHumanInput,
+    })
+
+    if (decision.kind === 'refuse') {
+      step.broadcast('deliveryRouted', {
+        id: inboxMessage.id,
+        status: 'refused',
+        reason: decision.reason,
+        origin: inboxMessage.origin,
+      })
+      return
+    }
+
+    if (decision.kind === 'steer' && activeRun) {
+      const message = messageWithOrigin(inboxMessage)
+      const steeringMessage = {
+        message,
+        origin: inboxMessage.origin,
+      }
+      const accepted =
+        decision.mode === 'interrupt'
+          ? activeRun.interrupt(steeringMessage)
+          : activeRun.steering.push(steeringMessage)
+
+      // Preserve the live fallback: a rejected steer becomes queued work.
+      if (!accepted) {
+        await queueRun(step, inboxMessage)
+        publishQueued(step, inboxMessage)
+        return
+      }
+
+      if (decision.mode === 'adaptive') {
+        const appended = await appendMessageIfAbsent(
+          step.db,
+          message,
+          new Date(inboxMessage.createdAt)
+        )
+        await publishTranscript(step, appended.revision)
+      }
+
+      step.broadcast('deliveryRouted', {
+        id: inboxMessage.id,
+        status: 'steered',
+        runId: activeRun.runId,
+        origin: inboxMessage.origin,
+      })
+      return
+    }
+
+    await queueRun(step, inboxMessage)
+    publishQueued(step, inboxMessage)
+  })
+
+  return { kind: 'inbox' }
+}
+
+async function queueRun(
+  context: ProcessInboxStepContext,
+  inboxMessage: InboxMessage
+): Promise<void> {
+  await context.queue.send('runs', {
+    idempotencyId: inboxMessage.id,
+    model: context.state.config.model,
+    message: messageWithOrigin(inboxMessage),
+  })
+}
+```
+
+`publishQueued` and `publishTranscript` may remain private in this module if
+they have no second consumer. If transcript projection is also used by actions
+or execution, move only that shared effect into a specifically named session
+module; do not hide it in `utils/`.
 
 Add fast unit tests under `tests/rivet/session/utils/` and
 `tests/rivet/session/workflow/process-inbox.test.ts`. These tests must not call
@@ -302,6 +394,30 @@ export type AcceptedWork = {
 export type NextWork =
   | (AcceptedWork & { kind: 'run' })
   | { kind: 'inbox' }
+
+export type ExecuteRunInput = {
+  command: RunCommand
+  runId: string
+}
+
+export type ConsumedRunStream = {
+  responseMessage?: UIMessage
+  outcome: UIMessageStreamOutcome
+  finishReason?: FinishReason
+  steps: RunStepMetadata[]
+  totalUsage: LanguageModelUsage
+  nextSequence: number
+}
+
+export type TerminalRunOutcome = {
+  status: Extract<
+    RunStatus,
+    'cancelled' | 'completed' | 'failed' | 'interrupted'
+  >
+  chunk: UIMessageChunk
+  error?: string
+  finishReason?: FinishReason
+}
 ```
 
 Do not place database row types, actor state, action signatures, or generic
@@ -332,6 +448,55 @@ Keep new-run title scheduling with submission because it is triggered by a
 newly created durable run. Do not merge it with lifecycle title recovery; their
 state-saving behavior differs.
 
+The exported operation should own queue receipt/completion while the durable
+callback owns database mutation and event publication:
+
+```ts
+export async function submitRun(
+  context: SessionWorkflowContext
+): Promise<NextWork> {
+  const queued = await context.queue.next('next-run', {
+    names: ['runs'],
+    completable: true,
+  })
+
+  const submission = await context.step('submit-run', async step => {
+    const result = await submitRunToDatabase(step.db, {
+      runId: createRunId(),
+      idempotencyId: queued.body.idempotencyId,
+      model: queued.body.model,
+      message: queued.body.message,
+      assistantMessageId: createMessageId(),
+    })
+
+    if (result.created) {
+      scheduleRunTitle(step, queued.body.message)
+      await publishCreatedRun(step, result)
+    }
+
+    publishDeliveryResult(step, queued.body, result)
+
+    return {
+      accepted: result.accepted,
+      deduplicated: result.accepted && !result.created,
+      runId: result.run.id,
+      status: result.run.status,
+      ...(!result.accepted
+        ? { reason: 'session_busy' as const }
+        : {}),
+    } satisfies RunCompletion
+  })
+
+  await queued.complete(submission)
+  return { kind: 'run', command: queued.body, submission }
+}
+```
+
+Use an alias such as `submitRunToDatabase` for the imported database function
+so the workflow operation can use the domain name `submitRun` without an import
+collision. `scheduleRunTitle`, `publishCreatedRun`, and
+`publishDeliveryResult` should remain private to this module.
+
 Effectful functions should accept the narrowest real Rivet context type that
 compiles structurally. Do not introduce `any`, `as unknown as`, or a service
 class that mirrors the entire actor context.
@@ -352,7 +517,11 @@ async function consumeRunStream(
 ): Promise<ConsumedRunStream> {
   const harness = createSessionHarness(context, input)
   const steps: RunStepMetadata[] = []
-  const response = createResponseCollector()
+  let responseMessage: UIMessage | undefined
+  const endState: {
+    outcome: UIMessageStreamOutcome
+    finishReason?: FinishReason
+  } = { outcome: { status: 'unknown' } }
 
   const stream = await createAgentUIStream({
     agent: harness.agent,
@@ -360,19 +529,52 @@ async function consumeRunStream(
     abortSignal: input.signal,
     generateMessageId: () => input.run.assistantMessageId,
     sendFinish: false,
-    onStepEnd: result => steps.push(toRunStepMetadata(result)),
-    onEnd: response.onEnd,
+    onStepEnd: result => {
+      steps.push(toRunStepMetadata(result))
+    },
+    onEnd: event => {
+      responseMessage = event.responseMessage
+      endState.outcome = event.outcome
+      endState.finishReason = event.finishReason
+    },
   })
 
-  for await (const chunk of stream) {
-    response.consume(chunk)
-    if (chunk.type !== 'abort') await input.publishFrame(chunk)
+  // Preserve a reconstructed response when AI SDK's onEnd callback does not
+  // provide one for an aborted stream.
+  let streamedResponseMessage: UIMessage | undefined
+  let snapshotController:
+    | ReadableStreamDefaultController<UIMessageChunk>
+    | undefined
+  const snapshots = readUIMessageStream({
+    stream: new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        snapshotController = controller
+      },
+    }),
+  })
+  const consumeSnapshots = (async () => {
+    for await (const snapshot of snapshots) {
+      streamedResponseMessage = snapshot
+    }
+  })()
+
+  try {
+    for await (const chunk of stream) {
+      snapshotController?.enqueue(chunk)
+      if (chunk.type !== 'abort') await input.publishFrame(chunk)
+    }
+  } finally {
+    snapshotController?.close()
+    await consumeSnapshots
   }
 
   return {
-    ...response.result(),
+    responseMessage: responseMessage ?? streamedResponseMessage,
+    outcome: endState.outcome,
+    finishReason: endState.finishReason,
     steps,
     totalUsage: aggregateUsage(steps),
+    nextSequence: input.currentSequence(),
   }
 }
 
@@ -385,10 +587,47 @@ export async function executeRun(
     timeout: 0,
     maxRetries: 0,
     run: async step => {
-      // Lookup, active-run setup, transition to running.
-      // Call the private consumeRunStream helper.
-      // Resolve and persist the terminal outcome.
-      // Requeue pending steering and clear activeRun in finally.
+      const run = await getRun(step.db, input.runId)
+      if (!run || terminalStatuses.has(run.status)) return
+
+      const activeRun = createActiveRun(run.id)
+      step.vars.activeRun = activeRun.publicState
+
+      try {
+        if (run.status === 'cancel_requested') {
+          await finalizeCancelledBeforeExecution(step, run)
+          return
+        }
+
+        await updateRun(step.db, run.id, {
+          status: 'running',
+          error: null,
+          startedAt: run.startedAt ?? new Date(),
+        })
+        publishStatus(step, run.id, 'running')
+
+        const result = await consumeRunStream(step, {
+          run,
+          command: input.command,
+          signal: activeRun.signal,
+          publishFrame: activeRun.publishFrame,
+        })
+        const terminal = resolveRunOutcome({
+          outcome: result.outcome,
+          cancelled: activeRun.cancelled,
+          interrupted: activeRun.interrupted,
+          workflowAborted: step.abortSignal.aborted,
+        })
+
+        await finalizeAndPublishRun(step, run, terminal, result)
+      } catch (error) {
+        await finalizeExecutionError(step, run, error)
+      } finally {
+        await requeuePendingSteering(step, input.command, activeRun)
+        if (step.vars.activeRun?.runId === run.id) {
+          step.vars.activeRun = undefined
+        }
+      }
     },
   })
 }
@@ -422,6 +661,57 @@ export function resolveRunOutcome(input: {
   return failedOutcome(input.outcome)
 }
 ```
+
+Keep persistence/event ordering visible in one local helper. It must preserve
+the current rule that the transaction lands before terminal events are sent:
+
+```ts
+async function finalizeAndPublishRun(
+  context: ExecuteRunStepContext,
+  run: RunRow,
+  terminal: TerminalRunOutcome,
+  streamed: ConsumedRunStream
+): Promise<void> {
+  const responseMessage = shouldPersistAssistantMessage(
+    terminal.status,
+    streamed.responseMessage
+  )
+    ? cutoffAssistantMessage(
+        run.assistantMessageId,
+        streamed.responseMessage,
+        terminal.status === 'cancelled'
+          ? '[Stopped]'
+          : '[Interrupted]'
+      )
+    : undefined
+
+  const finalized = await finalizeRun(context.db, run.id, {
+    status: terminal.status,
+    sequence: streamed.nextSequence,
+    chunk: terminal.chunk,
+    responseMessage,
+    error: terminal.error,
+    finishReason: terminal.finishReason,
+    steps: streamed.steps,
+    totalUsage: streamed.totalUsage,
+    responseMetadata: streamed.steps.at(-1)?.response,
+  })
+
+  context.broadcast('frame', {
+    runId: run.id,
+    seq: streamed.nextSequence,
+    chunk: terminal.chunk,
+  })
+  await publishTranscript(context, finalized.revision)
+  publishStatus(context, run.id, terminal.status, terminal.error)
+}
+```
+
+Keep `createActiveRun`, `finalizeCancelledBeforeExecution`,
+`finalizeExecutionError`, `finalizeAndPublishRun`, `publishStatus`, and
+`requeuePendingSteering` private inside `execute-run.ts` until another workflow
+step needs one of them. Only pure decisions should be exported for direct unit
+tests.
 
 Do not create a nested Rivet `consume-run-stream` step. Stream controllers,
 abort signals, steering state, and response accumulation remain inside the
@@ -478,6 +768,24 @@ Adapt the exact `processInbox` call signature to the queue result while keeping
 the outer control flow and durable names unchanged. `workflow/index.ts` should
 contain no database query, AI SDK stream construction, catalog call, message
 inspection, or terminal-outcome calculation.
+
+The intended workflow dependency direction is:
+
+```text
+workflow/index.ts
+  └── workflow/steps/index.ts
+        ├── process-inbox.ts ──► utils/messages.ts + db/index.ts
+        ├── submit-run.ts ─────► title.ts + db/index.ts
+        └── execute-run.ts ────► utils/messages.ts
+                                 utils/usage.ts
+                                 db/index.ts
+                                 chat/harness
+
+actions/* ─────────────────────► utils/messages.ts + db/index.ts
+```
+
+No step module may import `workflow/index.ts`, and utility modules may not
+import workflow, action, lifecycle, actor-context, catalog, or database code.
 
 **Verify**: `wc -l src/runtime/actors/session/workflow/index.ts` → preferably
 below 120 lines; `bun run typecheck` → exit 0.
