@@ -224,7 +224,7 @@ export class ScriptedScenarioController {
   }
 }
 
-async function streamTurn(
+export async function streamScriptedTurn(
   turn: ScriptedTurn,
   actual: ScriptedRequestSummary,
   controller: ScriptedScenarioController,
@@ -289,7 +289,7 @@ export function createScriptedLanguageModel(
     doStream: async call => {
       const consumed = controller.consume(call, modelId)
       return {
-        stream: await streamTurn(
+        stream: await streamScriptedTurn(
           consumed.turn,
           consumed.actual,
           controller,
