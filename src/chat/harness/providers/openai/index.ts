@@ -4,7 +4,7 @@ import {
 } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { CodexCredential } from '@/auth/profile'
-import type { AvailableModel } from './model-catalog'
+import type { AvailableModel } from '../model-catalog'
 
 export type ModelCatalogFetch = (
   input: string | URL | Request,
