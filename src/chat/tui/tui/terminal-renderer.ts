@@ -225,6 +225,7 @@ export class TerminalRenderer {
   #detachStream = false
   #switchSessionRequested = false
   #commands: readonly SlashCommand[] = []
+  #selectedCommandIndex = 0
   #connectionStatus?: string
   #connectionSpinnerTimer?: ReturnType<typeof setInterval>
 
@@ -282,7 +283,7 @@ export class TerminalRenderer {
       const render = () => {
         const spinner = connectionSpinnerFrames[frame] ?? '⠋'
         frame = (frame + 1) % connectionSpinnerFrames.length
-        this.#connectionStatus = `${colors.connection}${spinner} Waking agent…${colors.reset}`
+        this.#connectionStatus = `${colors.connection}${spinner} Waking…${colors.reset}`
         this.#upsertSection({
           id: connectionSectionId,
           kind: 'connection',
@@ -298,7 +299,7 @@ export class TerminalRenderer {
     }
 
     if (status === 'ready') {
-      this.#connectionStatus = `${colors.ready}● Agent ready${colors.reset}`
+      this.#connectionStatus = `${colors.ready}● Ready${colors.reset}`
       this.#upsertSection({
         id: connectionSectionId,
         kind: 'assistant',
@@ -307,7 +308,7 @@ export class TerminalRenderer {
       })
     } else {
       const detail = error ? `: ${error}` : ''
-      this.#connectionStatus = `${colors.error}● Agent failed${detail}${colors.reset}`
+      this.#connectionStatus = `${colors.error}● Failed${detail}${colors.reset}`
       this.#upsertSection({
         id: connectionSectionId,
         kind: 'error',
@@ -334,11 +335,13 @@ export class TerminalRenderer {
         switch (key.type) {
           case 'character':
             this.#inputText += key.value
+            this.#selectedCommandIndex = 0
             this.#showInputCursor()
             this.#paint()
             break
           case 'backspace':
             this.#inputText = this.#inputText.slice(0, -1)
+            this.#selectedCommandIndex = 0
             this.#showInputCursor()
             this.#paint()
             break
@@ -365,7 +368,9 @@ export class TerminalRenderer {
           }
           case 'up':
           case 'down':
-            this.#handleScroll(key.type)
+            if (!this.#handleCommandSelection(key.type)) {
+              this.#handleScroll(key.type)
+            }
             break
           case 'page-up':
           case 'page-down':
@@ -623,6 +628,7 @@ export class TerminalRenderer {
           !this.#streamSubmissionPending
         ) {
           this.#inputText += key.value
+          this.#selectedCommandIndex = 0
           this.#showInputCursor()
           this.#paint()
         }
@@ -633,6 +639,7 @@ export class TerminalRenderer {
           !this.#streamSubmissionPending
         ) {
           this.#inputText = this.#inputText.slice(0, -1)
+          this.#selectedCommandIndex = 0
           this.#showInputCursor()
           this.#paint()
         }
@@ -722,7 +729,9 @@ export class TerminalRenderer {
       }
       case 'up':
       case 'down':
-        this.#handleScroll(key.type)
+        if (!this.#handleCommandSelection(key.type)) {
+          this.#handleScroll(key.type)
+        }
         break
       case 'page-up':
       case 'page-down':
@@ -747,6 +756,19 @@ export class TerminalRenderer {
       this.#scrollOffset + delta
     )
     this.#paint()
+  }
+
+  #handleCommandSelection(direction: 'up' | 'down') {
+    const matches = matchingSlashCommands(this.#inputText, this.#commands)
+    if (matches.length === 0) return false
+
+    const delta = direction === 'up' ? -1 : 1
+    this.#selectedCommandIndex =
+      (this.#selectedCommandIndex + delta + matches.length) %
+      matches.length
+    this.#showInputCursor()
+    this.#paint()
+    return true
   }
 
   #handlePageScroll(direction: 'page-up' | 'page-down') {
@@ -994,10 +1016,14 @@ export class TerminalRenderer {
   }
 
   #paint() {
-    const completion = slashCommandCompletion(
-      this.#inputText,
-      this.#commands
+    const matches = matchingSlashCommands(this.#inputText, this.#commands)
+    const selectedCommandIndex = Math.min(
+      this.#selectedCommandIndex,
+      Math.max(0, matches.length - 1)
     )
+    const completion =
+      matches[selectedCommandIndex] ??
+      slashCommandCompletion(this.#inputText, this.#commands)
     const frame = renderScreenViewport({
       width: this.#width(),
       height: this.#height(),
@@ -1012,23 +1038,25 @@ export class TerminalRenderer {
         this.#inputActive && this.#connectionStatus
           ? this.#connectionStatus
           : this.#status,
-      commandSuggestions: matchingSlashCommands(
-        this.#inputText,
-        this.#commands
-      ).map(command => `${command.name}  ${command.description}`),
+      commandSuggestions: matches.map((command, index) => ({
+        name: command.name,
+        description: command.description,
+        selected: index === selectedCommandIndex,
+      })),
     })
 
     this.#frameBuffer.present(frame)
   }
 
   #acceptSlashCommandCompletion() {
-    const completion = slashCommandCompletion(
-      this.#inputText,
-      this.#commands
-    )
+    const matches = matchingSlashCommands(this.#inputText, this.#commands)
+    const completion =
+      matches[this.#selectedCommandIndex] ??
+      slashCommandCompletion(this.#inputText, this.#commands)
     if (!completion) return
 
     this.#inputText = completion.name
+    this.#selectedCommandIndex = 0
     this.#showInputCursor()
     this.#paint()
   }

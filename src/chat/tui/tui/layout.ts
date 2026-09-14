@@ -24,7 +24,13 @@ export type TUIScreenState = {
   inputCursorVisible?: boolean
   scrollOffset: number
   status?: string
-  commandSuggestions?: string[]
+  commandSuggestions?: CommandSuggestion[]
+}
+
+export type CommandSuggestion = {
+  name: string
+  description: string
+  selected?: boolean
 }
 
 export type TUIScreenLinesState = Omit<TUIScreenState, 'body'> & {
@@ -80,10 +86,15 @@ export function renderScreenViewport(
   const inputHeight = 3
   const bodyHeight = height - inputHeight
   const bodyContentHeight = bodyHeight - 2
-  const suggestions = state.commandSuggestions ?? []
+  const suggestions = (state.commandSuggestions ?? []).slice(
+    0,
+    Math.max(0, bodyContentHeight - 2)
+  )
+  const suggestionHeight =
+    suggestions.length > 0 ? suggestions.length + 2 : 0
   const transcriptHeight = Math.max(
     0,
-    bodyContentHeight - suggestions.length
+    bodyContentHeight - suggestionHeight
   )
   const visibleBody = state.visibleBodyLines.slice(0, transcriptHeight)
 
@@ -91,12 +102,11 @@ export function renderScreenViewport(
     visibleBody.push('')
   }
 
-  visibleBody.push(...suggestions.slice(0, bodyContentHeight))
-
   const lines = [
     topBorder(width, state.title, state.rightTitle),
     ...visibleBody.map(line => boxLine(line, width)),
     bottomBorder(width),
+    ...renderCommandMenu(suggestions, width),
     topBorder(width, state.inputActive ? (state.status ?? '') : 'Status'),
     boxLine(
       state.inputActive
@@ -112,6 +122,48 @@ export function renderScreenViewport(
   ]
 
   return lines.join('\n')
+}
+
+function renderCommandMenu(
+  suggestions: CommandSuggestion[],
+  width: number
+) {
+  if (suggestions.length === 0) return []
+
+  const contentWidth = Math.max(1, width - 4)
+  const longestName = Math.max(
+    ...suggestions.map(suggestion => visibleLength(suggestion.name))
+  )
+  const nameWidth = Math.min(
+    longestName,
+    Math.max(1, Math.floor((contentWidth - 2) * 0.4))
+  )
+
+  return [
+    topBorder(width, ''),
+    ...suggestions.map(suggestion => {
+      const name = sliceVisible(suggestion.name, nameWidth)
+      const row = `${name}${' '.repeat(
+        Math.max(0, nameWidth - visibleLength(name)) + 2
+      )}${suggestion.description}`
+
+      return commandMenuLine(row, width, suggestion.selected === true)
+    }),
+    bottomBorder(width),
+  ]
+}
+
+function commandMenuLine(line: string, width: number, selected: boolean) {
+  const contentWidth = width - 4
+  const visible = sliceVisible(line, contentWidth)
+  const content = ` ${visible}${' '.repeat(
+    Math.max(0, contentWidth - visibleLength(visible))
+  )} `
+  const styled = selected
+    ? `\x1b[7m${content}\x1b[0m`
+    : `\x1b[2m${content}\x1b[0m`
+
+  return `│${styled}│`
 }
 
 export function wrapText(input: string, width: number): string[] {

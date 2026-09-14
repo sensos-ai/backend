@@ -60,9 +60,28 @@ const commands = [
     description: 'Switch to another session',
     run: () => 'switch-session' as const,
   },
+  {
+    name: '/model' as const,
+    description: 'Choose the model',
+    run: () => 'continue' as const,
+  },
 ]
 
 describe('TerminalRenderer slash command completion', () => {
+  test('shows only the connection status in the input bar', async () => {
+    const input = new FakeInput()
+    const output = new FakeOutput()
+    const renderer = new TerminalRenderer({ input, output })
+    const prompt = renderer.readPrompt()
+
+    await Promise.resolve()
+    renderer.setAgentConnectionStatus('ready')
+    expect(output.chunks.join('')).toContain('┌ \x1b[92m● Ready\x1b[0m ')
+
+    input.emit('data', Buffer.from('\x03'))
+    await expect(prompt).rejects.toThrow('Interrupted')
+  })
+
   test('renders a ghost suffix and accepts it with Tab', async () => {
     const input = new FakeInput()
     const output = new FakeOutput()
@@ -79,6 +98,32 @@ describe('TerminalRenderer slash command completion', () => {
     input.emit('data', Buffer.from('\r'))
 
     await expect(prompt).resolves.toBe('/switch-session')
+  })
+
+  test('highlights and completes the selected command', async () => {
+    const input = new FakeInput()
+    const output = new FakeOutput()
+    const renderer = new TerminalRenderer({ input, output })
+    const prompt = renderer.readPrompt({ commands })
+
+    await Promise.resolve()
+    input.emit('data', Buffer.from('/'))
+    expect(output.chunks.join('')).toContain(
+      '\x1b[7m /switch-session  Switch to another session'
+    )
+    expect(output.chunks.join('')).toContain(
+      '\x1b[2m /model           Choose the model'
+    )
+
+    input.emit('data', Buffer.from('\x1B[B'))
+    expect(output.chunks.join('')).toContain(
+      '\x1b[7m /model           Choose the model'
+    )
+
+    input.emit('data', Buffer.from('\t'))
+    input.emit('data', Buffer.from('\r'))
+
+    await expect(prompt).resolves.toBe('/model')
   })
 })
 
