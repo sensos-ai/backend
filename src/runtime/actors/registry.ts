@@ -1,10 +1,11 @@
 import { setup } from 'rivetkit'
 import { sessionAgent } from '@/runtime/actors/session'
+import { RUNTIME_ENDPOINT } from '@/runtime/constants'
 
 export const registry = setup({
   use: { session: sessionAgent },
   runtime: 'native',
-  endpoint: 'http://127.0.0.1:6420',
+  endpoint: RUNTIME_ENDPOINT,
   startEngine: false,
   startServices: false,
   noWelcome: true,

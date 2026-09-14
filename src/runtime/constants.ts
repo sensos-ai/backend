@@ -4,7 +4,16 @@ import { computeRuntimeSourceIdentity } from './build-identity'
 declare const __SENSOS_RUNTIME_BUILD_ID__: string
 
 export const RUNTIME_HOST = '127.0.0.1'
-export const RUNTIME_PORT = 6420
+const configuredRuntimePort = Number(
+  process.env.SENSOS_RUNTIME_PORT ?? 6420
+)
+if (
+  !Number.isInteger(configuredRuntimePort) ||
+  configuredRuntimePort < 1
+) {
+  throw new Error('SENSOS_RUNTIME_PORT must be a positive integer')
+}
+export const RUNTIME_PORT = configuredRuntimePort
 export const RUNTIME_ENDPOINT = `http://${RUNTIME_HOST}:${RUNTIME_PORT}`
 export const RUNTIME_PROTOCOL_VERSION =
   process.env.SENSOS_RUNTIME_PROTOCOL_VERSION?.trim() || '1'

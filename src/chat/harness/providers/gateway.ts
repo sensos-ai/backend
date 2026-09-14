@@ -42,6 +42,9 @@ export const aiGateway = (config: GatewayProviderSettings = {}) => {
     apiKey:
       credential?.accessToken ?? process.env.AI_GATEWAY_API_KEY ?? '',
     ...(credential?.teamId ? { teamIdOrSlug: credential.teamId } : {}),
+    ...(process.env.SENSOS_GATEWAY_BASE_URL
+      ? { baseURL: process.env.SENSOS_GATEWAY_BASE_URL }
+      : {}),
     ...config,
   })
 }
