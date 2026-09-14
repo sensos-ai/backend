@@ -1,14 +1,3 @@
-import type { GatewayModelId } from 'ai'
-
-export const CHAT_MODELS = [
-  {
-    name: 'anthropic/claude-fable-5',
-    value: 'anthropic/claude-fable-5',
-  },
-  { name: 'openai/gpt-5.6-sol', value: 'openai/gpt-5.6-sol' },
-  { name: 'openai/gpt-6-astra', value: 'openai/gpt-6-astra' },
-] as const satisfies readonly { name: string; value: GatewayModelId }[]
-
 export function resumeArguments(args: string[]): string[] {
   const pickerIndex = args.findIndex(
     value => value === '-i' || value === '--interactive'

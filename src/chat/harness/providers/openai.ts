@@ -2,6 +2,58 @@ import {
   createOpenAI,
   type OpenAIResponsesProviderOptions,
 } from '@ai-sdk/openai'
+import { z } from 'zod'
+import type { CodexCredential } from '@/auth/profile'
+import type { AvailableModel } from './model-catalog'
+
+export type ModelCatalogFetch = (
+  input: string | URL | Request,
+  init?: RequestInit
+) => Promise<Response>
+
+export const CODEX_MODELS_URL =
+  'https://chatgpt.com/backend-api/codex/models'
+
+const codexModelsResponseSchema = z.object({
+  models: z.array(
+    z.object({
+      slug: z.string(),
+      display_name: z.string(),
+      description: z.string().nullish(),
+      visibility: z.string().optional(),
+      supported_in_api: z.boolean().optional(),
+    })
+  ),
+})
+
+export async function getCodexModels(
+  credential: CodexCredential,
+  fetchImpl: ModelCatalogFetch = fetch
+): Promise<AvailableModel[]> {
+  const response = await fetchImpl(CODEX_MODELS_URL, {
+    headers: {
+      Authorization: `Bearer ${credential.accessToken}`,
+      'chatgpt-account-id': credential.accountId,
+      originator: 'sensos',
+      Accept: 'application/json',
+    },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `Could not load Codex models (${response.status} ${response.statusText})`
+    )
+  }
+
+  return codexModelsResponseSchema
+    .parse(await response.json())
+    .models.filter(model => model.visibility !== 'hide')
+    .filter(model => model.supported_in_api !== false)
+    .map(model => ({
+      id: model.slug,
+      name: model.display_name,
+      ...(model.description ? { description: model.description } : {}),
+    }))
+}
 
 export function createOpenaiOptions(
   isCodex: boolean,

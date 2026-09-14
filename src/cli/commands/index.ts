@@ -18,7 +18,8 @@ import {
   type SessionCatalog,
 } from '@/storage/session-catalog'
 import { HELP_TEXT } from './help'
-import { CHAT_MODELS, commandArguments } from '@/config/models'
+import { commandArguments } from '@/config/models'
+import { listModelsForActiveProvider } from '@/chat/harness/providers/model-catalog'
 import { removeProductData, uninstallSensos } from './maintenance'
 import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
@@ -321,11 +322,19 @@ async function runChatSession(
           name: '/model',
           description: 'Choose the model for subsequent messages',
           run: async () => {
-            let model: (typeof CHAT_MODELS)[number]['value']
+            let model: string
             try {
+              const models = await listModelsForActiveProvider()
+              if (models.length === 0) {
+                throw new Error('The active provider returned no models.')
+              }
               model = await select({
                 message: 'Select a model',
-                choices: CHAT_MODELS,
+                choices: models.map(({ id, name, description }) => ({
+                  name,
+                  value: id,
+                  ...(description ? { description } : {}),
+                })),
               })
             } catch (error) {
               if (

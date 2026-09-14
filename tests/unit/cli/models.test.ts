@@ -1,24 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  CHAT_MODELS,
-  commandArguments,
-  resumeArguments,
-} from '@/config/models'
+import { commandArguments, resumeArguments } from '@/config/models'
 
 describe('sensos models and resume arguments', () => {
-  test('uses the three explicit gateway model ids', () => {
-    expect(CHAT_MODELS.map(model => model.name)).toEqual([
-      'anthropic/claude-fable-5',
-      'openai/gpt-5.6-sol',
-      'openai/gpt-6-astra',
-    ])
-    expect(CHAT_MODELS.map(model => model.value)).toEqual([
-      'anthropic/claude-fable-5',
-      'openai/gpt-5.6-sol',
-      'openai/gpt-6-astra',
-    ])
-  })
-
   test('turns the top-level resume alias into chat session arguments', () => {
     expect(
       resumeArguments(['--resume', 'session_123', '--test-model'])
