@@ -237,6 +237,7 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
 {
   readonly #connection: SessionTransportConnection
   readonly #clientId: string
+  readonly #activeBridges = new Set<StreamBridge>()
 
   constructor(
     connection: SessionConnection,
@@ -294,13 +295,17 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     })
 
     try {
-      await this.#connection.deliver({
+      const routed = await this.#connection.deliver({
         id,
         priority,
         message,
         createdAt: Date.now(),
         origin: { type: 'client', clientId: this.#clientId },
       })
+      if (!options.waitForStart || routed.status !== 'queued') {
+        cleanup()
+        return routed
+      }
     } catch (error) {
       cleanup()
       throw error
@@ -320,7 +325,7 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       throw new Error('SessionChatTransport does not support regeneration')
     }
 
-    const bridge = createStreamBridge(this.#connection)
+    const bridge = this.#createBridge()
     let runId: string | undefined
     let aborted = abortSignal?.aborted ?? false
     const onAbort = () => {
@@ -346,7 +351,11 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
         throw new Error(
           result.reason === 'waiting_for_input'
             ? 'Immediate steering is unavailable while the session is waiting for input'
-            : 'Inbox message did not start a run'
+            : result.reason === 'session_busy'
+              ? 'The session is still processing another turn'
+              : result.reason === 'not_active'
+                ? 'The active run ended before the message could be delivered'
+                : 'The session could not start this message'
         )
       }
       runId = result.runId
@@ -366,7 +375,7 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   }: Parameters<
     ChatTransport<UI_MESSAGE>['reconnectToStream']
   >[0]): Promise<ReadableStream<UIMessageChunk> | null> {
-    const bridge = createStreamBridge(this.#connection)
+    const bridge = this.#createBridge()
     const onAbort = () => bridge.close()
     abortSignal?.addEventListener('abort', onAbort, { once: true })
     bridge.addCleanup(() =>
@@ -392,6 +401,23 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       bridge.fail(error)
       return bridge.stream
     }
+  }
+
+  detachActiveStreams(): void {
+    for (const bridge of this.#activeBridges) bridge.close()
+  }
+
+  async stopActiveRun(): Promise<{ cancelled: boolean; runId?: string }> {
+    const session = await this.#connection.getSession()
+    if (!session.activeRunId) return { cancelled: false }
+    return this.#connection.cancel(session.activeRunId)
+  }
+
+  #createBridge(): StreamBridge {
+    const bridge = createStreamBridge(this.#connection)
+    this.#activeBridges.add(bridge)
+    bridge.addCleanup(() => this.#activeBridges.delete(bridge))
+    return bridge
   }
 }
 
@@ -430,5 +456,13 @@ export class DeferredSessionChatTransport<
     options: Parameters<ChatTransport<UI_MESSAGE>['reconnectToStream']>[0]
   ): Promise<ReadableStream<UIMessageChunk> | null> {
     return (await this.#transport).reconnectToStream(options)
+  }
+
+  async stopActiveRun() {
+    return (await this.#transport).stopActiveRun()
+  }
+
+  detachActiveStreams(): void {
+    void this.#transport.then(value => value.detachActiveStreams())
   }
 }

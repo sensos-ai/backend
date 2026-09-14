@@ -41,6 +41,7 @@ export type AgentTUIStreamResult = {
     | ReadableStream<UIMessageChunk>
   message?: UIMessage
   abort?: () => void
+  detach?: () => void
 }
 
 export type AgentTUIStreamOptions = {
@@ -62,6 +63,8 @@ export type AgentTUISessionOptions = {
     prompt: string,
     priority: DeliveryPriority
   ) => Promise<void>
+  onStopDuringStream?: () => Promise<void>
+  detachOnInterrupt?: boolean
 }
 
 export type AgentTUIToolApprovalRequest = {
@@ -171,6 +174,7 @@ export class AgentTUIRunner {
     let rendererSuspended = false
     let pendingHydration: AgentTUIHydration | undefined
     let removeHydrationUpdates: (() => void) | undefined
+    let resumedStream: AgentTUIStreamResult | undefined
 
     const applyHydration = (snapshot: AgentTUIHydration) => {
       pendingHydration = undefined
@@ -232,9 +236,17 @@ export class AgentTUIRunner {
       removeHydrationUpdates = hydrationUpdateCleanup
     }
 
+    if (
+      prompt == null &&
+      this.transport &&
+      messages.at(-1)?.role === 'user'
+    ) {
+      resumedStream = await this.resumeMessages()
+    }
+
     try {
       while (true) {
-        if (!streamWithoutPrompt) {
+        if (!streamWithoutPrompt && !resumedStream) {
           if (prompt == null) {
             if (!this.renderer.readPrompt) {
               if (hasRunTurn) {
@@ -289,13 +301,17 @@ export class AgentTUIRunner {
           hasRunTurn = true
         }
 
-        const result = await this.streamMessages(
-          [...messages],
-          generateMessageId,
-          deliveryPriority
-        )
+        const result =
+          resumedStream ??
+          (await this.streamMessages(
+            [...messages],
+            generateMessageId,
+            deliveryPriority
+          ))
+        resumedStream = undefined
         deliveryPriority = 'adaptive'
 
+        rendererSuspended = true
         try {
           const responseMessage = await this.renderer.renderStream(
             result,
@@ -308,6 +324,26 @@ export class AgentTUIRunner {
               responseStatistics: this.responseStatistics,
               contextSize: this.contextSize,
               waitForExit: false,
+              detachOnInterrupt: Boolean(this.transport),
+              onStopDuringStream: this.transport
+                ? async () => {
+                    const transport = this
+                      .transport as ChatTransport<UIMessage> & {
+                      stopActiveRun?: () => Promise<{
+                        cancelled: boolean
+                      }>
+                    }
+                    if (!transport.stopActiveRun) {
+                      throw new Error(
+                        'This chat transport does not support stopping an active run'
+                      )
+                    }
+                    const stopped = await transport.stopActiveRun()
+                    if (!stopped.cancelled) {
+                      throw new Error('There is no active run to stop')
+                    }
+                  }
+                : undefined,
               onSubmitDuringStream: this.transport
                 ? async (nextPrompt, priority) => {
                     const transport = this
@@ -385,6 +421,9 @@ export class AgentTUIRunner {
           }
 
           throw error
+        } finally {
+          rendererSuspended = false
+          if (pendingHydration) applyHydration(pendingHydration)
         }
         streamWithoutPrompt = false
         prompt = undefined
@@ -420,6 +459,12 @@ export class AgentTUIRunner {
         }),
         message: lastAssistantMessage(messages),
         abort,
+        detach: () => {
+          const transport = this.transport as ChatTransport<UIMessage> & {
+            detachActiveStreams?: () => void
+          }
+          transport.detachActiveStreams?.()
+        },
       }
     }
 
@@ -445,6 +490,22 @@ export class AgentTUIRunner {
       ),
       message: lastAssistantMessage(messages),
       abort,
+    }
+  }
+
+  private async resumeMessages(): Promise<
+    AgentTUIStreamResult | undefined
+  > {
+    if (!this.transport) return undefined
+    const abortController = new AbortController()
+    const stream = await this.transport.reconnectToStream({
+      chatId: this.chatId,
+      abortSignal: abortController.signal,
+    })
+    if (!stream) return undefined
+    return {
+      uiMessageStream: stream,
+      detach: () => abortController.abort(),
     }
   }
 }

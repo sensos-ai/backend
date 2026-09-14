@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   findSlashCommand,
   matchingSlashCommands,
+  parseStreamingInput,
 } from '@/chat/tui/commands'
 
 const commands = [
@@ -23,5 +24,25 @@ describe('slash commands', () => {
   test('only executes an exact command', () => {
     expect(findSlashCommand('/MODEL', commands)?.name).toBe('/model')
     expect(findSlashCommand('/mo', commands)).toBeUndefined()
+  })
+
+  test('separates stream controls from delivered messages', () => {
+    expect(parseStreamingInput('/exit')).toEqual({ type: 'exit' })
+    expect(parseStreamingInput('/STOP')).toEqual({ type: 'stop' })
+    expect(parseStreamingInput('/interrupt change course')).toEqual({
+      type: 'delivery',
+      prompt: 'change course',
+      priority: 'now',
+    })
+    expect(parseStreamingInput('/queue do this next')).toEqual({
+      type: 'delivery',
+      prompt: 'do this next',
+      priority: 'next',
+    })
+    expect(parseStreamingInput('ordinary message')).toEqual({
+      type: 'delivery',
+      prompt: 'ordinary message',
+      priority: 'adaptive',
+    })
   })
 })

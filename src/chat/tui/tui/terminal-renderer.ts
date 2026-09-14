@@ -11,7 +11,7 @@ import type {
 } from '../run-agent-tui'
 import {
   matchingSlashCommands,
-  parseStreamingDelivery,
+  parseStreamingInput,
   type DeliveryPriority,
   type SlashCommand,
 } from '../commands'
@@ -70,6 +70,8 @@ export type TerminalRendererOptions = {
     prompt: string,
     priority: DeliveryPriority
   ) => Promise<void>
+  onStopDuringStream?: () => Promise<void>
+  detachOnInterrupt?: boolean
 }
 
 export type TerminalSessionOptions = {
@@ -87,6 +89,8 @@ export type TerminalSessionOptions = {
     prompt: string,
     priority: DeliveryPriority
   ) => Promise<void>
+  onStopDuringStream?: () => Promise<void>
+  detachOnInterrupt?: boolean
 }
 
 export type TerminalKey =
@@ -313,7 +317,7 @@ export class TerminalRenderer {
   async readPrompt(options?: TerminalSessionOptions): Promise<string> {
     this.#start(options)
     this.#inputActive = true
-    this.#inputText = options?.initialPrompt ?? ''
+    this.#inputText = options?.initialPrompt ?? this.#inputText
     this.#commands = options?.commands ?? []
     this.#status = `Type a prompt and press Enter · ${activeControls}`
     this.#startInputCursorBlink()
@@ -336,6 +340,12 @@ export class TerminalRenderer {
             break
           case 'enter': {
             const prompt = this.#inputText
+            if (!prompt.trim()) {
+              this.#inputText = ''
+              this.#showInputCursor()
+              this.#paint()
+              break
+            }
             this.#inputActive = false
             this.#stopInputCursorBlink()
             this.#status = processingStatus
@@ -397,7 +407,10 @@ export class TerminalRenderer {
     }
     this.#paint()
     const streamInterrupted = new Promise<void>(resolve => {
-      this.#resolveStreamInterrupt = resolve
+      this.#resolveStreamInterrupt = () => {
+        result.detach?.()
+        resolve()
+      }
     })
     this.#onData = chunk => this.#handleStreamingKey(chunk, options)
     this.#attachInput()
@@ -432,7 +445,7 @@ export class TerminalRenderer {
       }
     } finally {
       this.#resolveStreamInterrupt = undefined
-      if (this.#interrupted) {
+      if (this.#interrupted && !options?.detachOnInterrupt) {
         result.abort?.()
       }
       this.#detachInput()
@@ -609,13 +622,44 @@ export class TerminalRenderer {
         ) {
           break
         }
-        let delivery: ReturnType<typeof parseStreamingDelivery>
+        let input: ReturnType<typeof parseStreamingInput>
         try {
-          delivery = parseStreamingDelivery(this.#inputText)
+          input = parseStreamingInput(this.#inputText)
         } catch (error) {
           this.#addErrorSection('Delivery', formatStreamError(error))
           this.#inputText = ''
           this.#paint()
+          break
+        }
+        if (input.type === 'exit') {
+          this.#interrupted = true
+          this.#resolveStreamInterrupt?.()
+          break
+        }
+        if (input.type === 'stop') {
+          const stopActiveRun = options?.onStopDuringStream
+          if (!stopActiveRun) {
+            this.#addErrorSection(
+              'Stop',
+              'This chat transport does not support stopping an active run'
+            )
+            this.#inputText = ''
+            this.#paint()
+            break
+          }
+          this.#streamSubmissionPending = true
+          this.#inputText = ''
+          this.#status = 'Stopping...'
+          this.#paint()
+          void stopActiveRun()
+            .catch(error => {
+              this.#addErrorSection('Stop', formatStreamError(error))
+              this.#status = streamingStatus
+            })
+            .finally(() => {
+              this.#streamSubmissionPending = false
+              this.#paint()
+            })
           break
         }
         this.#streamSubmissionPending = true
@@ -623,20 +667,22 @@ export class TerminalRenderer {
         this.#status = 'Delivering message...'
         this.#paint()
         void options
-          .onSubmitDuringStream(delivery.prompt, delivery.priority)
+          .onSubmitDuringStream(input.prompt, input.priority)
           .then(
             () => {
-              this.#addUserSection(delivery.prompt)
+              if (this.#interrupted) return
+              this.#addUserSection(input.prompt)
               this.#status = streamingStatus
             },
             error => {
+              if (this.#interrupted) return
               this.#addErrorSection('Delivery', formatStreamError(error))
               this.#status = streamingStatus
             }
           )
           .finally(() => {
             this.#streamSubmissionPending = false
-            this.#paint()
+            if (!this.#interrupted) this.#paint()
           })
         break
       }

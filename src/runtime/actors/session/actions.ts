@@ -73,8 +73,7 @@ const deliver: SessionActions['deliver'] = async (
     if (!accepted) {
       const receipt = {
         id: inboxMessage.id,
-        status: 'refused',
-        reason: 'not_active',
+        status: 'queued',
         origin: inboxMessage.origin,
       } satisfies DeliveryRoutedEvent
       context.broadcast('deliveryRouted', receipt)

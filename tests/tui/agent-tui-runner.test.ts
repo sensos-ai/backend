@@ -212,4 +212,80 @@ describe('AgentTUIRunner history hydration', () => {
     await running
     expect(cleanedUp).toBe(true)
   })
+
+  test('reconnects to a durable active stream before accepting another prompt', async () => {
+    const calls: string[] = []
+    const activeMessage = restoredMessages[0]
+    if (!activeMessage) throw new Error('Missing restored user message')
+    const activeMessages: UIMessage[] = [activeMessage]
+    const renderer: AgentTUIRenderer = {
+      renderMessages() {},
+      async readPrompt() {
+        calls.push('prompt')
+        return undefined
+      },
+      async renderStream() {
+        calls.push('stream')
+        return {
+          id: 'msg_resumed_assistant',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'resumed answer' }],
+        }
+      },
+    }
+    const transport: ChatTransport<UIMessage> = {
+      async sendMessages() {
+        throw new Error('A resumed stream must not submit a new message')
+      },
+      async reconnectToStream() {
+        calls.push('reconnect')
+        return new ReadableStream()
+      },
+    }
+
+    await new AgentTUIRunner({
+      chatId: 'chat_active',
+      initialMessages: activeMessages,
+      renderer,
+      transport,
+    }).run()
+
+    expect(calls).toEqual(['reconnect', 'stream', 'prompt'])
+  })
+
+  test('wires an explicit stream stop without treating it as a message', async () => {
+    let stopped = 0
+    const renderer: AgentTUIRenderer = {
+      renderMessages() {},
+      async readPrompt() {
+        return stopped === 0 ? 'start' : undefined
+      },
+      async renderStream(_result, options) {
+        await options?.onStopDuringStream?.()
+        return undefined
+      },
+    }
+    const transport = {
+      async sendMessages() {
+        return new ReadableStream()
+      },
+      async reconnectToStream() {
+        return null
+      },
+      async stopActiveRun() {
+        stopped += 1
+        return { cancelled: true }
+      },
+    } satisfies ChatTransport<UIMessage> & {
+      stopActiveRun(): Promise<{ cancelled: boolean }>
+    }
+
+    await new AgentTUIRunner({
+      chatId: 'chat_stoppable',
+      renderer,
+      transport,
+    }).run()
+
+    expect(stopped).toBe(1)
+  })
 })

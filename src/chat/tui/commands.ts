@@ -41,18 +41,26 @@ export function slashCommandArgument(input: string): string | undefined {
   return argument || undefined
 }
 
-export function parseStreamingDelivery(input: string): {
-  prompt: string
-  priority: DeliveryPriority
-} {
+export type StreamingInput =
+  | { type: 'delivery'; prompt: string; priority: DeliveryPriority }
+  | { type: 'exit' }
+  | { type: 'stop' }
+
+export function parseStreamingInput(input: string): StreamingInput {
   const trimmed = input.trim()
+  if (/^\/exit$/i.test(trimmed)) return { type: 'exit' }
+  if (/^\/stop$/i.test(trimmed)) return { type: 'stop' }
+
   const command = trimmed.match(/^\/(interrupt|queue)(?:\s+([\s\S]+))?$/i)
-  if (!command) return { prompt: input, priority: 'adaptive' }
+  if (!command) {
+    return { type: 'delivery', prompt: input, priority: 'adaptive' }
+  }
   const prompt = command[2]?.trim()
   if (!prompt) {
     throw new Error(`Usage: /${command[1]?.toLowerCase()} <message>`)
   }
   return {
+    type: 'delivery',
     prompt,
     priority: command[1]?.toLowerCase() === 'interrupt' ? 'now' : 'next',
   }

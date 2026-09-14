@@ -113,10 +113,13 @@ async function routeInboxMessage(
           ? activeRun.interrupt(steeringMessage)
           : activeRun.steering.push(steeringMessage)
       if (!accepted) {
+        await step.queue.send(
+          'runs',
+          toRunCommand(step.state.config.model, inboxMessage)
+        )
         step.broadcast('deliveryRouted', {
           id: inboxMessage.id,
-          status: 'refused',
-          reason: 'not_active',
+          status: 'queued',
           origin: inboxMessage.origin,
         })
         return
@@ -251,16 +254,17 @@ function hasAssistantContent(message: UIMessage | undefined): boolean {
   return message?.parts.some(part => part.type !== 'step-start') ?? false
 }
 
-function interruptedAssistantMessage(
+function cutoffAssistantMessage(
   assistantMessageId: string,
-  responseMessage: UIMessage | undefined
+  responseMessage: UIMessage | undefined,
+  fallback: '[Interrupted]' | '[Stopped]'
 ): UIMessage {
   if (hasAssistantContent(responseMessage))
     return responseMessage as UIMessage
   return {
     id: assistantMessageId,
     role: 'assistant',
-    parts: [{ type: 'text', text: '[Interrupted]', state: 'done' }],
+    parts: [{ type: 'text', text: fallback, state: 'done' }],
   }
 }
 
@@ -639,10 +643,13 @@ export const runWorkflow: RunWorkflow = async context => {
                   responseMessage:
                     status === 'completed'
                       ? responseMessage
-                      : status === 'interrupted'
-                        ? interruptedAssistantMessage(
+                      : status === 'interrupted' || status === 'cancelled'
+                        ? cutoffAssistantMessage(
                             run.assistantMessageId,
-                            responseMessage
+                            responseMessage,
+                            status === 'cancelled'
+                              ? '[Stopped]'
+                              : '[Interrupted]'
                           )
                         : undefined,
                   error: failure,
@@ -662,7 +669,11 @@ export const runWorkflow: RunWorkflow = async context => {
                   seq: sequence,
                   chunk: terminalChunk,
                 })
-                if (status === 'completed' || status === 'interrupted') {
+                if (
+                  status === 'completed' ||
+                  status === 'interrupted' ||
+                  status === 'cancelled'
+                ) {
                   const messages = await listMessages(step.db)
                   await projectTranscript(
                     step.state.sessionId,
@@ -693,12 +704,15 @@ export const runWorkflow: RunWorkflow = async context => {
                   sequence,
                   chunk,
                   responseMessage:
-                    status === 'interrupted'
-                      ? interruptedAssistantMessage(
+                    status === 'interrupted' || status === 'cancelled'
+                      ? cutoffAssistantMessage(
                           run.assistantMessageId,
                           hasAssistantContent(streamedResponseMessage)
                             ? streamedResponseMessage
-                            : responseMessage
+                            : responseMessage,
+                          status === 'cancelled'
+                            ? '[Stopped]'
+                            : '[Interrupted]'
                         )
                       : undefined,
                   error: status === 'failed' ? failure : undefined,

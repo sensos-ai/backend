@@ -220,6 +220,29 @@ describe('SessionChatTransport', () => {
     ])
   })
 
+  test('accepts a queued delivery from the action response without waiting for another event', async () => {
+    const fake = new FakeConnection()
+    fake.deliver = async input => {
+      const inbox = input as {
+        id: string
+        origin: DeliveryRoutedEvent['origin']
+      }
+      return {
+        id: inbox.id,
+        status: 'queued' as const,
+        origin: inbox.origin,
+      }
+    }
+
+    expect(
+      await transport(fake).deliverMessage(userMessage, 'next')
+    ).toEqual({
+      id: expect.any(String),
+      status: 'queued',
+      origin: { type: 'client', clientId: 'chat-client' },
+    })
+  })
+
   test('deduplicates frames received during snapshot replay', async () => {
     const fake = new FakeConnection()
     fake.streamSnapshot = async () => {
@@ -248,6 +271,45 @@ describe('SessionChatTransport', () => {
     expect(stream).not.toBeNull()
     if (!stream) throw new Error('Expected an active stream')
     expect(await chunks(stream)).toEqual([finishChunk])
+  })
+
+  test('detaches a stream reader without cancelling the actor run', async () => {
+    const fake = new FakeConnection()
+    fake.snapshot = {
+      run: run('running'),
+      frames: [
+        {
+          seq: 0,
+          chunk: { type: 'text-start', id: 'text-1' },
+        },
+      ],
+    }
+    const value = transport(fake)
+    const stream = await value.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'session-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    value.detachActiveStreams()
+
+    expect(await chunks(stream)).toEqual([
+      { type: 'text-start', id: 'text-1' },
+    ])
+    expect(fake.cancelled).toEqual([])
+  })
+
+  test('stops the active actor run explicitly', async () => {
+    const fake = new FakeConnection()
+    fake.activeRunId = 'run-1'
+
+    expect(await transport(fake).stopActiveRun()).toEqual({
+      cancelled: true,
+      runId: 'run-1',
+    })
+    expect(fake.cancelled).toEqual(['run-1'])
   })
 
   test('cancels the resolved run when aborted during submission', async () => {

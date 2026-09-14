@@ -242,6 +242,7 @@ async function runChat(
       })
       .catch(() => undefined)
 
+    const chatTransport = new DeferredSessionChatTransport(connectionReady)
     await new AgentTUIRunner({
       renderer,
       title: `sensos · ${catalogSession.title ?? sessionId}`,
@@ -282,7 +283,7 @@ async function runChat(
           unsubscribe?.()
         }
       },
-      transport: new DeferredSessionChatTransport(connectionReady),
+      transport: chatTransport,
       requestOptions: () => ({
         body: {
           idempotencyId: createIdempotencyId(),
@@ -308,6 +309,14 @@ async function runChat(
             argument
               ? { prompt: argument, priority: 'next' as const }
               : undefined,
+        },
+        {
+          name: '/stop',
+          description: 'Stop the active run without sending a message',
+          run: async () => {
+            await chatTransport.stopActiveRun()
+            return undefined
+          },
         },
         {
           name: '/model',
