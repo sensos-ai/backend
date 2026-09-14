@@ -35,12 +35,12 @@ chunks, malformed stream termination, runtime startup failure, and normal
 exit/signal cleanup. Failure cases persist partial output while remaining
 distinct from cancellation.
 
-Disconnect/resume is captured as a todo contract in
-`tests/e2e/cli/session-resume.test.ts`. It exposed a product defect: detaching
-the real CLI does not abort the provider, but the held HTTP stream stops
-advancing and the resumed CLI cannot recover the run or queued successor.
-Keep this phase in progress until that contract runs green; do not weaken it
-to a completed-stream resume test.
+Disconnect/resume and `/switch-session` are implemented in
+`tests/e2e/cli/session-resume.test.ts`. The disconnect journey kills the real
+CLI while its provider stream is held, proves the runtime and provider work
+survive without cancellation, resumes through the compiled command, and
+asserts active and queued output appear exactly once. Durable stream offsets
+provide ordered replay without making the terminal client own the run.
 
 ### `/interrupt <message>`
 
@@ -95,6 +95,8 @@ output and no orphan resources.
 - [x] Each journey passes alone and with the entire E2E directory.
 - [x] Successful and failed tests leave no tmux session, CLI process, runtime,
   listener, or temporary product data.
+- [x] A hard-disconnected CLI can resume an active durable stream and its queued
+  successor without aborting provider work or duplicating transcript output.
 
 References:
 

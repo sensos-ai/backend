@@ -71,7 +71,7 @@ tests/
 | test-layer-contracts | complete | Establish explicit unit, integration, E2E, stress, coverage, lint, and CI commands. | [View](./phases/test-layer-contracts.md) |
 | rivet-test-isolation | complete | Replace the suite-global registry with per-test `setupTest` ownership and align the test tree. | [View](./phases/rivet-test-isolation.md) |
 | scripted-model-fixtures | complete | Make streaming, reasoning, tools, failure, and cancellation deterministic per test. | [View](./phases/scripted-model-fixtures.md) |
-| cli-e2e-contracts | in progress | Prove `/interrupt`, `/queue`, `/stop`, reconnect, and persistence through the real CLI/TUI boundary. | [View](./phases/cli-e2e-contracts.md) |
+| cli-e2e-contracts | complete | Prove `/interrupt`, `/queue`, `/stop`, reconnect, and persistence through the real CLI/TUI boundary. | [View](./phases/cli-e2e-contracts.md) |
 | parallel-stress-confidence | todo | Prove isolation under parallelism, random ordering, repetition, and process failure. | [View](./phases/parallel-stress-confidence.md) |
 | suite-pruning | todo | Remove redundant and low-signal tests while preserving boundary and risk coverage. | [View](./phases/suite-pruning.md) |
 | test-governance | in progress | Document the test contract, enforce CI gates, and keep failures diagnosable. | [View](./phases/test-governance.md) |
