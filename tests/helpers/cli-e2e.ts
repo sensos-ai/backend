@@ -208,8 +208,23 @@ export async function startCliE2E(
           `${JSON.stringify({ requests: gateway.requests, aborts: gateway.aborts }, null, 2)}\n`
         ),
       ])
+      const runtimeLog = Bun.file(
+        join(state, 'sensos', 'runtime', 'supervisor', 'runtime.log')
+      )
+      if (await runtimeLog.exists()) {
+        await writeFile(
+          join(artifacts, `${id}.runtime.log`),
+          new Uint8Array(await runtimeLog.arrayBuffer())
+        )
+      }
       await rm(root, { recursive: true, force: true })
     },
   }
-  return api
+  try {
+    await api.waitForScreen('Agent ready', 20_000)
+    return api
+  } catch (error) {
+    await api.stop()
+    throw error
+  }
 }

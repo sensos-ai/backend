@@ -29,5 +29,6 @@ CLAUDE.local.md
 .claude/worktrees/
 .agents/worktrees/
 .agents/plans
+.agents/reference/
 .claude/plans/
 .claude/settings.local.json

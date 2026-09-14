@@ -53,7 +53,6 @@ test('/interrupt cancels the active provider request and completes a successor r
     .connect()
     .connect({ clientId: 'interrupt-observer' })
   try {
-    await cli.waitForScreen('Agent ready', 20_000)
     await cli.sendLine('begin interrupt journey')
     await cli.gateway.waitForRequest(1, 20_000)
     const active = await waitForValue(
@@ -117,7 +116,6 @@ test('/queue defers one message until the active run completes', async () => {
   })
   const connection = cli.connect().connect({ clientId: 'queue-observer' })
   try {
-    await cli.waitForScreen('Agent ready', 20_000)
     await cli.sendLine('begin queue journey')
     await cli.gateway.waitForRequest(1, 20_000)
     await cli.sendLine('/queue run exactly once later')
@@ -167,7 +165,6 @@ test('/stop cancels without a successor and leaves the composer usable', async (
   })
   const connection = cli.connect().connect({ clientId: 'stop-observer' })
   try {
-    await cli.waitForScreen('Agent ready', 20_000)
     await cli.sendLine('begin stop journey')
     await cli.gateway.waitForRequest(1, 20_000)
     const active = await waitForValue(
