@@ -20,9 +20,12 @@ import {
 import { HELP_TEXT } from './help'
 import { commandArguments } from '@/config/models'
 import {
+  createHarnessAuthRegistry,
   createHarnessProviderRegistry,
   defaultModelRef,
+  harnessAuthKeys,
   listModelsForActiveProvider,
+  type HarnessAuthKey,
   modelRefForProvider,
   type ModelRef,
   type ModelProvider,
@@ -62,6 +65,14 @@ const createClientId = createIdGeneratorWithPrefix('cli')
 const createChatId = createIdGeneratorWithPrefix('chat')
 const createIdempotencyId = createIdGeneratorWithPrefix('request')
 const clientId = createClientId()
+const authKeys = harnessAuthKeys(createHarnessProviderRegistry())
+const authKeyUsage = authKeys.join('|')
+const defaultAuthKey = authKeys[0]
+if (!defaultAuthKey) {
+  throw new Error(
+    'No model-provider authentication methods are registered.'
+  )
+}
 
 type SessionConnection = ActorConn<SessionActor>
 type ChatOptions = {
@@ -90,29 +101,37 @@ function openBrowser(url: string): Promise<void> {
   })
 }
 
-async function login(provider: 'vercel' | 'codex'): Promise<void> {
+function isHarnessAuthKey(value: string): value is HarnessAuthKey {
+  return authKeys.some(authKey => authKey === value)
+}
+
+async function login(authKey: HarnessAuthKey): Promise<void> {
   const controller = new AbortController()
   const cancel = () => controller.abort()
   process.once('SIGINT', cancel)
   try {
     const profile = await readProviderProfile()
     const providers = createHarnessProviderRegistry(profile.credentials)
-    if (provider === 'codex') {
+    const provider = createHarnessAuthRegistry(providers)[authKey]
+    if (provider.sensosId === 'codex') {
       console.log('Opening OpenAI Codex sign-in in your browser.')
-      const credential = await providers.codex.auth.login({
+      const credential = await provider.auth.login({
         openUrl: openBrowser,
         signal: controller.signal,
       })
       await updateProviderProfile(profile => ({
         ...profile,
-        activeProvider: 'codex',
-        credentials: { ...profile.credentials, codex: credential },
+        activeProvider: provider.sensosId,
+        credentials: {
+          ...profile.credentials,
+          [provider.sensosId]: credential,
+        },
       }))
       console.log('Connected to OpenAI Codex.')
       return
     }
 
-    const credential = await providers.gateway.auth.login({
+    const credential = await provider.auth.login({
       openUrl: async url => {
         console.log(`Open this URL to connect Vercel AI Gateway:\n${url}`)
         try {
@@ -133,8 +152,11 @@ async function login(provider: 'vercel' | 'codex'): Promise<void> {
     })
     await updateProviderProfile(profile => ({
       ...profile,
-      activeProvider: 'gateway',
-      credentials: { ...profile.credentials, gateway: credential },
+      activeProvider: provider.sensosId,
+      credentials: {
+        ...profile.credentials,
+        [provider.sensosId]: credential,
+      },
     }))
     console.log('Connected to Vercel AI Gateway.')
   } finally {
@@ -163,18 +185,18 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
   console.log(`Active provider: ${provider}`)
 }
 
-async function logout(provider: 'vercel' | 'codex'): Promise<void> {
-  const providerId = provider === 'vercel' ? 'gateway' : 'codex'
+async function logout(authKey: HarnessAuthKey): Promise<void> {
   const profile = await readProviderProfile()
   const harness = createHarnessProviderRegistry(profile.credentials)
-  if (providerId === 'gateway') {
+  const provider = createHarnessAuthRegistry(harness)[authKey]
+  if (provider.sensosId === 'gateway') {
     const credential = profile.credentials.gateway
-    if (credential) await harness.gateway.auth.logout?.(credential)
+    if (credential) await provider.auth.logout?.(credential)
   } else {
     const credential = profile.credentials.codex
-    if (credential) await harness.codex.auth.logout?.(credential)
+    if (credential) await provider.auth.logout?.(credential)
   }
-  await clearProviderCredential(providerId)
+  await clearProviderCredential(provider.sensosId)
 }
 
 async function runChatSession(
@@ -567,17 +589,17 @@ async function main(): Promise<void> {
   }
 
   if (command === 'login') {
-    const provider = args[0] ?? 'vercel'
-    if (provider !== 'vercel' && provider !== 'codex') {
-      throw new Error('Usage: sensos login [vercel|codex]')
+    const provider = args[0] ?? defaultAuthKey
+    if (!isHarnessAuthKey(provider)) {
+      throw new Error(`Usage: sensos login [${authKeyUsage}]`)
     }
     await login(provider)
     return
   }
   if (command === 'logout') {
-    const provider = args[0] ?? 'vercel'
-    if (provider !== 'vercel' && provider !== 'codex') {
-      throw new Error('Usage: sensos logout [vercel|codex]')
+    const provider = args[0] ?? defaultAuthKey
+    if (!isHarnessAuthKey(provider)) {
+      throw new Error(`Usage: sensos logout [${authKeyUsage}]`)
     }
     await logout(provider)
     console.log(`Signed out of ${provider}.`)

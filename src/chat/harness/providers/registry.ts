@@ -5,7 +5,7 @@ import {
   type VercelCredential,
 } from './gateway'
 import { createCodexHarnessProvider, type CodexCredential } from './openai'
-import type { CredentialOf } from './harness-provider'
+import type { AuthKeyOf, CredentialOf } from './harness-provider'
 
 export type HarnessProviderCredentialsInput = {
   gateway?: VercelCredential
@@ -39,8 +39,28 @@ export type HarnessProviderRegistry = ReturnType<
 export type ModelProvider = keyof HarnessProviderRegistry
 export type RegisteredHarnessProvider =
   HarnessProviderRegistry[ModelProvider]
+export type HarnessAuthKey = AuthKeyOf<RegisteredHarnessProvider>
+export type HarnessAuthRegistry = {
+  [Provider in RegisteredHarnessProvider as Provider['authKey']]: Provider
+}
 export type ProviderCredentials = {
   [K in ModelProvider]?: CredentialOf<HarnessProviderRegistry[K]>
+}
+
+export function createHarnessAuthRegistry(
+  harness: HarnessProviderRegistry
+): HarnessAuthRegistry {
+  return Object.fromEntries(
+    Object.values(harness).map(provider => [provider.authKey, provider])
+  ) as HarnessAuthRegistry
+}
+
+export function harnessAuthKeys(
+  harness: HarnessProviderRegistry
+): HarnessAuthKey[] {
+  return Object.keys(
+    createHarnessAuthRegistry(harness)
+  ) as HarnessAuthKey[]
 }
 
 export function createAiProviderRegistry(

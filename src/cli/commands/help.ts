@@ -1,3 +1,12 @@
+import {
+  createHarnessProviderRegistry,
+  harnessAuthKeys,
+} from '@/chat/harness/providers'
+
+const authKeyUsage = harnessAuthKeys(createHarnessProviderRegistry()).join(
+  '|'
+)
+
 export const HELP_TEXT = `Usage: sensos [options]
 
 Run sensos without a subcommand to start a new session.
@@ -18,8 +27,8 @@ Options:
   -h, --help                  Show help
 
 Providers:
-  login [vercel|codex]        Sign in to a model provider
-  logout [vercel|codex]       Sign out of a model provider
+  login [${authKeyUsage}]        Sign in to a model provider
+  logout [${authKeyUsage}]       Sign out of a model provider
   provider <gateway|codex>    Choose the active model provider
 
 Runtime:

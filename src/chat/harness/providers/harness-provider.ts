@@ -27,6 +27,7 @@ export interface HarnessAuth<
 
 export interface HarnessProviderOptions<
   Id extends string,
+  AuthKey extends string,
   Provider extends ProviderV4,
   ModelId extends string,
   Model extends HarnessModel<ModelId>,
@@ -36,6 +37,7 @@ export interface HarnessProviderOptions<
   User = unknown,
 > {
   sensosId: Id
+  authKey: AuthKey
   provider: Provider
   defaultModelId: ModelId
   listModels(
@@ -46,6 +48,7 @@ export interface HarnessProviderOptions<
 
 export class SensosHarnessProvider<
   const Id extends string,
+  const AuthKey extends string,
   Provider extends ProviderV4,
   ModelId extends string,
   Model extends HarnessModel<ModelId>,
@@ -55,6 +58,7 @@ export class SensosHarnessProvider<
   User = unknown,
 > {
   readonly sensosId: Id
+  readonly authKey: AuthKey
   readonly provider: Provider
   readonly defaultModelId: ModelId
   readonly auth: HarnessAuth<Credential, LoginOptions, User>
@@ -65,6 +69,7 @@ export class SensosHarnessProvider<
   constructor(
     options: HarnessProviderOptions<
       Id,
+      AuthKey,
       Provider,
       ModelId,
       Model,
@@ -75,6 +80,7 @@ export class SensosHarnessProvider<
     >
   ) {
     this.sensosId = options.sensosId
+    this.authKey = options.authKey
     this.provider = options.provider
     this.defaultModelId = options.defaultModelId
     this.auth = options.auth
@@ -95,6 +101,7 @@ export class SensosHarnessProvider<
 export type ModelIdOf<Provider> =
   Provider extends SensosHarnessProvider<
     string,
+    string,
     ProviderV4,
     infer ModelId,
     HarnessModel<any>,
@@ -109,6 +116,7 @@ export type ModelIdOf<Provider> =
 export type CredentialOf<Provider> =
   Provider extends SensosHarnessProvider<
     string,
+    string,
     ProviderV4,
     string,
     HarnessModel<string>,
@@ -118,4 +126,19 @@ export type CredentialOf<Provider> =
     unknown
   >
     ? Credential
+    : never
+
+export type AuthKeyOf<Provider> =
+  Provider extends SensosHarnessProvider<
+    string,
+    infer AuthKey,
+    ProviderV4,
+    string,
+    HarnessModel<string>,
+    unknown,
+    unknown,
+    unknown,
+    unknown
+  >
+    ? AuthKey
     : never

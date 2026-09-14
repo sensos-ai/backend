@@ -163,8 +163,11 @@ export type { ModelRef } from './model'
 export { modelRefForProvider } from './model'
 export {
   createAiProviderRegistry,
+  createHarnessAuthRegistry,
   createHarnessProviderRegistry,
+  harnessAuthKeys,
 } from './registry'
+export type { HarnessAuthKey } from './registry'
 export {
   SensosHarnessProvider,
   type HarnessAuth,

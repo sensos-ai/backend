@@ -94,6 +94,7 @@ export function createGatewayHarnessProvider(
     dependencies.provider ?? aiGateway(dependencies.config, credential)
   return new SensosHarnessProvider({
     sensosId: 'gateway',
+    authKey: 'vercel',
     provider,
     defaultModelId: DEFAULT_MODEL,
     async listModels(): Promise<readonly GatewayCatalogModel[]> {

@@ -131,6 +131,7 @@ export function createCodexHarnessProvider(
   })
   return new SensosHarnessProvider({
     sensosId: 'codex',
+    authKey: 'codex',
     provider,
     defaultModelId: CODEX_DEFAULT_MODEL,
     async listModels() {
