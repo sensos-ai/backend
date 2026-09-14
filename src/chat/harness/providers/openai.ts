@@ -24,6 +24,7 @@ const codexModelsResponseSchema = z.object({
       description: z.string().nullish(),
       visibility: z.string().optional(),
       supported_in_api: z.boolean().optional(),
+      priority: z.number().optional(),
     })
   ),
 })
@@ -49,12 +50,20 @@ export async function getCodexModels(
 
   return codexModelsResponseSchema
     .parse(await response.json())
-    .models.filter(model => model.visibility !== 'hide')
-    .filter(model => model.supported_in_api !== false)
+    .models.filter(model => model.visibility === 'list')
+    .filter(model => model.supported_in_api === true)
+    .sort(
+      (left, right) =>
+        (left.priority ?? Number.MAX_SAFE_INTEGER) -
+        (right.priority ?? Number.MAX_SAFE_INTEGER)
+    )
     .map(model => ({
       id: model.slug,
       name: model.display_name,
       ...(model.description ? { description: model.description } : {}),
+      ...(model.priority !== undefined
+        ? { priority: model.priority }
+        : {}),
     }))
 }
 

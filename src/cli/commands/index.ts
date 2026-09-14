@@ -20,6 +20,11 @@ import {
 import { HELP_TEXT } from './help'
 import { commandArguments } from '@/config/models'
 import { listModelsForActiveProvider } from '@/chat/harness/providers/model-catalog'
+import {
+  modelRefForProvider,
+  type ModelRef,
+} from '@/chat/harness/providers/model'
+import { defaultModelRef } from '@/chat/harness/providers'
 import { removeProductData, uninstallSensos } from './maintenance'
 import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
@@ -212,7 +217,10 @@ async function runChatSession(
       responseStatistics: 'outputTokensPerSecond',
     })
 
-    let selectedModel = options.model
+    const initialProvider = (await readProviderProfile()).activeProvider
+    let selectedModel: ModelRef = options.model
+      ? modelRefForProvider(initialProvider, options.model)
+      : defaultModelRef(initialProvider)
     const ready = (async () => {
       await runtime?.ready
       const client = createClient<typeof registry>(RUNTIME_ENDPOINT)
@@ -221,7 +229,7 @@ async function runChatSession(
           sessionId,
           catalogRevision: catalogSession.revision,
           cwd: options.cwd,
-          ...(options.model ? { model: options.model } : {}),
+          ...(selectedModel ? { model: selectedModel } : {}),
           features: options.features,
         },
       })
@@ -322,7 +330,7 @@ async function runChatSession(
           name: '/model',
           description: 'Choose the model for subsequent messages',
           run: async () => {
-            let model: string
+            let model: ModelRef
             try {
               const models = await listModelsForActiveProvider()
               if (models.length === 0) {
@@ -330,9 +338,9 @@ async function runChatSession(
               }
               model = await select({
                 message: 'Select a model',
-                choices: models.map(({ id, name, description }) => ({
+                choices: models.map(({ ref, name, description }) => ({
                   name,
-                  value: id,
+                  value: ref,
                   ...(description ? { description } : {}),
                 })),
               })

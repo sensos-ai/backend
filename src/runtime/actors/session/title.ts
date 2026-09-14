@@ -10,14 +10,24 @@ import { MockLanguageModelV3 } from 'ai/test'
 import type { OpenAILanguageModelChatOptions } from '@ai-sdk/openai'
 import type { HarnessFeatures } from '@/chat/harness'
 import {
+  CODEX_DEFAULT_MODEL,
   createProviderOptions,
+  languageModelForRef,
   loggingMiddleware,
-  providerRegistry,
 } from '@/chat/harness/providers'
+import type { ModelProvider } from '@/auth/profile'
+import { readProviderProfileSync } from '@/auth/profile'
+import type { ModelRef } from '@/chat/harness/providers/model'
 
 export const TITLE_MODEL: GatewayModelId = 'openai/gpt-5-nano'
 const MAX_TITLE_LENGTH = 80
 const MAX_TITLE_OUTPUT_TOKENS = 30
+
+export function titleModelRef(provider: ModelProvider): ModelRef {
+  return provider === 'codex'
+    ? { provider, modelId: CODEX_DEFAULT_MODEL }
+    : { provider, modelId: TITLE_MODEL }
+}
 
 export function titleMaxOutputTokens(
   provider: 'codex' | 'gateway'
@@ -84,6 +94,7 @@ export async function generateSessionTitle(
   prompt: string,
   options: {
     model?: LanguageModel
+    provider?: ModelProvider
     features?: HarnessFeatures
   } = {}
 ): Promise<string | undefined> {
@@ -104,9 +115,11 @@ export async function generateSessionTitle(
     return normalizeSessionTitle(result.text)
   }
 
-  const { activeProvider, codex, gateway } = providerRegistry()
+  const activeProvider =
+    options.provider ?? readProviderProfileSync().activeProvider
+  const resolved = languageModelForRef(titleModelRef(activeProvider))
   const model = wrapLanguageModel({
-    model: activeProvider === 'codex' ? codex() : gateway(TITLE_MODEL),
+    model: resolved.model,
     middleware: loggingMiddleware,
   })
 
@@ -116,7 +129,7 @@ export async function generateSessionTitle(
       instructions:
         'Create a concise title for this chat session. Return only the title, with no quotes or punctuation wrapper. Use at most 8 words.',
       prompt,
-      providerOptions: createProviderOptions(),
+      providerOptions: createProviderOptions({}, activeProvider),
     })
     return normalizeSessionTitle(await result.text)
   }

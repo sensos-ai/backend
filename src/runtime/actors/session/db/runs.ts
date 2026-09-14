@@ -1,10 +1,10 @@
 import type {
   FinishReason,
-  GatewayModelId,
   LanguageModelUsage,
   UIMessage,
   UIMessageChunk,
 } from 'ai'
+import type { ModelRef } from '@/chat/harness/providers/model'
 import { and, desc, eq, notInArray } from 'drizzle-orm'
 import type { SessionDatabase } from './database'
 import { messageExists, nextMessageSequence } from './messages'
@@ -31,7 +31,7 @@ const terminalStatuses = new Set<RunStatus>([
 export interface SubmitRunInput {
   runId: string
   idempotencyId: string
-  model?: GatewayModelId
+  model?: ModelRef
   message: UIMessage
   assistantMessageId: string
   createdAt?: Date
@@ -94,7 +94,12 @@ export async function submitRun(
         .values({
           id: input.runId,
           idempotencyId: input.idempotencyId,
-          ...(input.model ? { model: input.model } : {}),
+          ...(input.model
+            ? {
+                modelProvider: input.model.provider,
+                modelId: input.model.modelId,
+              }
+            : {}),
           userMessageId: input.message.id,
           assistantMessageId: input.assistantMessageId,
           status: 'queued',

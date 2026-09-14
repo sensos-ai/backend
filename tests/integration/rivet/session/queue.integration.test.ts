@@ -66,7 +66,10 @@ test('run submission persists once and deduplicates retries', async () => {
   }
   const command = {
     idempotencyId: createTestId(),
-    model: 'openai/gpt-5.6-sol' as const,
+    model: {
+      provider: 'gateway' as const,
+      modelId: 'openai/gpt-5.6-sol' as const,
+    },
     message,
   }
 
@@ -83,7 +86,8 @@ test('run submission persists once and deduplicates retries', async () => {
   expect(await handle.getRun(first.response.runId)).toMatchObject({
     id: first.response.runId,
     idempotencyId: command.idempotencyId,
-    model: command.model,
+    modelProvider: command.model.provider,
+    modelId: command.model.modelId,
   })
   expect((await handle.getSession()).messages).toContainEqual(message)
 

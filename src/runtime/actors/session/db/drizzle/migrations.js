@@ -4,6 +4,7 @@ import m0002 from './0002_violet_blindfold.sql' with { type: 'text' }
 import m0003 from './0003_lyrical_morlocks.sql' with { type: 'text' }
 import m0004 from './0004_outstanding_bullseye.sql' with { type: 'text' }
 import m0005 from './0005_wealthy_silverclaw.sql' with { type: 'text' }
+import m0006 from './0006_cool_tigra.sql' with { type: 'text' }
 import journal from './meta/_journal.json' with { type: 'json' }
 
 export default {
@@ -15,5 +16,6 @@ export default {
     m0003,
     m0004,
     m0005,
+    m0006,
   },
 }

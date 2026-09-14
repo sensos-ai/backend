@@ -2,7 +2,6 @@ import {
   ToolLoopAgent,
   stepCountIs,
   wrapLanguageModel,
-  type GatewayModelId,
   type UIMessage,
 } from 'ai'
 import type { LanguageModelV4 } from '@ai-sdk/provider'
@@ -11,6 +10,7 @@ import {
   loggingMiddleware,
   createProviderOptions,
   type ProviderOptions,
+  type ModelRef,
 } from './providers'
 import { DEFAULT_AGENT_INSTRUCTIONS } from './constants'
 import { resolveHarnessFeatures, type HarnessFeatures } from './features'
@@ -29,7 +29,7 @@ export interface CreateHarnessOptions {
   signal: AbortSignal
   instructions?: string
   initialMessages?: UIMessage[]
-  model?: GatewayModelId
+  model?: ModelRef
   maxSteps?: number
   features?: HarnessFeatures
   providerOptions?: ProviderOptions
@@ -46,15 +46,11 @@ export function createHarness(options: CreateHarnessOptions) {
 
   const toolsContext = { sandbox: options.sandbox }
 
-  const { testModel, gateway, codex, activeProvider } = providerRegistry()
-
+  const providers = providerRegistry()
+  const resolved = providers.resolveModel(options.model)
   const model =
     options.languageModel ??
-    (features.useMockModel
-      ? testModel
-      : activeProvider === 'codex'
-        ? codex(options.model)
-        : gateway(options.model))
+    (features.useMockModel ? providers.testModel : resolved.model)
 
   const agent = new ToolLoopAgent({
     model: wrapLanguageModel({ model, middleware: loggingMiddleware }),
@@ -66,7 +62,10 @@ export function createHarness(options: CreateHarnessOptions) {
       grep: toolsContext,
       bash: toolsContext,
     },
-    providerOptions: createProviderOptions(options.providerOptions),
+    providerOptions: createProviderOptions(
+      options.providerOptions,
+      options.model?.provider ?? resolved?.provider
+    ),
     prepareStep: options.steeringInput
       ? async ({ messages }) => ({
           messages:

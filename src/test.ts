@@ -40,7 +40,10 @@ const queued = await connection.send(
   'runs',
   {
     idempotencyId: createIdempotencyId(),
-    model: 'openai/gpt-5.6-terra',
+    model: {
+      provider: 'gateway',
+      modelId: 'openai/gpt-5.6-terra',
+    },
     message,
   },
   { wait: true, timeout: 10_000 }

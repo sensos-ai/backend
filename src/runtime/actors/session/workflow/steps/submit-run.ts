@@ -91,6 +91,7 @@ export async function submitRun(
             (async () => {
               const title = await generateSessionTitle(prompt, {
                 features: state.config.features,
+                provider: queued.body.model?.provider,
               })
               if (!title || state.title) return
               const session = catalog

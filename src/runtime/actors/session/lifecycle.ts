@@ -26,8 +26,24 @@ import type {
   OnWake,
   OnConnect,
 } from './types'
+import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
+import { defaultModelRef } from '@/chat/harness/providers'
+import { readProviderProfileSync } from '@/auth/profile'
 
 const AGENTOS_SOFTWARE_ENV = 'SENSOS_AGENTOS_SOFTWARE_PATHS'
+
+type TitleLifecycleContext =
+  | Parameters<OnCreate>[0]
+  | Parameters<OnWake>[0]
+  | Parameters<OnConnect>[0]
+
+function migrateLegacySessionModel(context: TitleLifecycleContext): void {
+  context.state.config.model = normalizeLegacyModelRef(
+    context.state.config.model as
+      | typeof context.state.config.model
+      | string
+  )
+}
 
 export function parseAgentOsSoftwarePaths(
   raw: string | undefined
@@ -72,17 +88,14 @@ export const createState: CreateState = (context, rawInput) => {
     config: {
       hostCwd: resolve(input.cwd),
       guestCwd: DEFAULT_WORKSPACE_PATH,
-      model: input.model,
+      model:
+        input.model ??
+        defaultModelRef(readProviderProfileSync().activeProvider),
       instructions: input.instructions,
       features: resolveHarnessFeatures(input.features),
     },
   }
 }
-
-type TitleLifecycleContext =
-  | Parameters<OnCreate>[0]
-  | Parameters<OnWake>[0]
-  | Parameters<OnConnect>[0]
 
 function scheduleMissingSessionTitle(
   context: TitleLifecycleContext
@@ -106,6 +119,7 @@ function scheduleMissingSessionTitle(
 
       const title = await generateSessionTitle(prompt, {
         features: context.state.config.features,
+        provider: context.state.config.model?.provider,
       })
       if (!title || context.state.title) return
 
@@ -164,6 +178,7 @@ export const onCreate: OnCreate = async (context, _input) => {
 }
 
 export const onWake: OnWake = async context => {
+  migrateLegacySessionModel(context)
   const catalog = configuredSessionCatalog()
   const persistedMeta = await getSessionMeta(context.db)
   await recoverOrphanedActiveRun({
@@ -203,6 +218,7 @@ export const onWake: OnWake = async context => {
 }
 
 export const onConnect: OnConnect = async context => {
+  migrateLegacySessionModel(context)
   const meta = await getSessionMeta(context.db)
   await recoverOrphanedActiveRun({
     database: context.db,

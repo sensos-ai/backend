@@ -23,7 +23,7 @@ describe('createHarness', () => {
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
-      model: 'openai/gpt-5.6-sol',
+      model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
       initialMessages,
     })
 
@@ -37,7 +37,7 @@ describe('createHarness', () => {
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
-      model: 'openai/gpt-5.6-sol',
+      model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
     })
 
     expect(harness.initialMessages).toEqual([])
@@ -50,7 +50,7 @@ describe('createHarness', () => {
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
-      model: 'openai/gpt-5.6-sol',
+      model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
       features: { useMockModel: false },
     })
 

@@ -97,7 +97,10 @@ class FakeConnection {
         ? ('streaming' as const)
         : ('ready' as const),
       activeRunId: this.activeRunId,
-      model: 'openai/gpt-5.6-sol' as const,
+      model: {
+        provider: 'gateway' as const,
+        modelId: 'openai/gpt-5.6-sol' as const,
+      },
     }
   }
 
@@ -168,7 +171,10 @@ describe('SessionChatTransport', () => {
       abortSignal: undefined,
       body: {
         idempotencyId: 'request-requested',
-        model: 'openai/gpt-6-astra',
+        model: {
+          provider: 'gateway',
+          modelId: 'openai/gpt-6-astra',
+        },
       },
     })
 
@@ -336,7 +342,12 @@ describe('SessionChatTransport', () => {
       messageId: undefined,
       messages: [userMessage],
       abortSignal: abortController.signal,
-      body: { model: 'openai/gpt-5.6-sol' },
+      body: {
+        model: {
+          provider: 'gateway',
+          modelId: 'openai/gpt-5.6-sol',
+        },
+      },
     })
 
     abortController.abort()

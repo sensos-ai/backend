@@ -18,6 +18,9 @@ import runModelMigration from '@/runtime/actors/session/db/drizzle/0004_outstand
 import removeResolvedModelMigration from '@/runtime/actors/session/db/drizzle/0005_wealthy_silverclaw.sql' with {
   type: 'text',
 }
+import modelProviderMigration from '@/runtime/actors/session/db/drizzle/0006_cool_tigra.sql' with {
+  type: 'text',
+}
 
 function applyMigration(database: Database, migration: string) {
   for (const statement of migration.split('--> statement-breakpoint')) {
@@ -39,11 +42,16 @@ describe('session actor migrations', () => {
     applyMigration(database, sessionTitleMigration)
     applyMigration(database, runModelMigration)
     applyMigration(database, removeResolvedModelMigration)
+    database.run(
+      `INSERT INTO runs (id, idempotency_id, model, status, created_at)
+       VALUES ('run_codex', 'idem_codex', 'gpt-5.6-sol', 'completed', 2)`
+    )
+    applyMigration(database, modelProviderMigration)
 
     const upgraded = database
       .query(
         `SELECT user_message_id, assistant_message_id, finish_reason,
-                model, steps, total_usage,
+                model, model_provider, steps, total_usage,
                 response_metadata, title
          FROM runs
          LEFT JOIN session_meta ON session_meta.singleton_id = 1
@@ -55,6 +63,7 @@ describe('session actor migrations', () => {
       assistant_message_id: '',
       finish_reason: null,
       model: 'openai/gpt-5.6-terra',
+      model_provider: 'gateway',
       steps: null,
       total_usage: null,
       response_metadata: null,
@@ -66,6 +75,11 @@ describe('session actor migrations', () => {
     expect(runColumns.map(column => column.name)).not.toContain(
       'resolved_model'
     )
+    expect(
+      database
+        .query(`SELECT model_provider FROM runs WHERE id = 'run_codex'`)
+        .get()
+    ).toEqual({ model_provider: 'codex' })
 
     database.run(
       `INSERT INTO run_frames (run_id, sequence, payload, created_at)

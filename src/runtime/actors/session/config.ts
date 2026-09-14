@@ -1,15 +1,11 @@
 import { event, type queue } from 'rivetkit'
-import type {
-  ChatStatus,
-  GatewayModelId,
-  UIMessage,
-  UIMessageChunk,
-} from 'ai'
+import type { ChatStatus, UIMessage, UIMessageChunk } from 'ai'
 import { createQueue } from './queue'
 import type { RunStatus } from './db'
 import { toChatStatus } from './utils/status'
 import { z } from 'zod'
 import type { MessageOrigin } from '@/chat/harness'
+import { modelRefSchema } from '@/chat/harness/providers/model'
 
 export type QueueTypeToken<
   TMessage,
@@ -19,9 +15,7 @@ export type QueueTypeToken<
 
 const runCommandSchema = z.object({
   idempotencyId: z.string(),
-  model: z
-    .custom<GatewayModelId>(value => typeof value === 'string')
-    .optional(),
+  model: modelRefSchema.optional(),
   message: z.custom<UIMessage>(),
 })
 

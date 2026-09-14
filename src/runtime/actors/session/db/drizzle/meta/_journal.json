@@ -43,6 +43,13 @@
       "when": 1789259603123,
       "tag": "0005_wealthy_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789416331961,
+      "tag": "0006_cool_tigra",
+      "breakpoints": true
     }
   ]
 }

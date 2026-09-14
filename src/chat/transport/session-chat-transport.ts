@@ -1,9 +1,4 @@
-import type {
-  ChatTransport,
-  GatewayModelId,
-  UIMessage,
-  UIMessageChunk,
-} from 'ai'
+import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 import type { Offset } from '@durable-streams/client'
 import type { ActorConn } from 'rivetkit/client'
 import type { HarnessFeatures } from '@/chat/harness'
@@ -20,6 +15,7 @@ import {
   type RunStreamItem,
 } from '@/runtime/durable-run-stream'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import type { ModelRef } from '@/chat/harness/providers/model'
 
 export type SessionConnection = ActorConn<SessionActor>
 
@@ -29,7 +25,7 @@ export type SessionSnapshot = {
   runStatus: StatusChangedEvent['runStatus']
   status: StatusChangedEvent['status']
   activeRunId?: string
-  model?: GatewayModelId
+  model?: ModelRef
   features: HarnessFeatures
   title?: string
   error?: string
@@ -62,7 +58,7 @@ const createIdempotencyId = createIdGeneratorWithPrefix('request')
 
 type SessionChatRequestBody = {
   idempotencyId?: string
-  model?: GatewayModelId
+  model?: ModelRef
   priority?: InboxMessage['priority']
 }
 

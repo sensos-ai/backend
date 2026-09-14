@@ -12,6 +12,7 @@ import {
   getCodexModels,
 } from '@/chat/harness/providers/openai'
 import type { ProviderProfile } from '@/auth/profile'
+import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 
 const profile = {
   version: 1,
@@ -25,6 +26,17 @@ const profile = {
 } as const satisfies ProviderProfile
 
 describe('provider model catalogs', () => {
+  test('normalizes legacy model strings into provider-qualified refs', () => {
+    expect(normalizeLegacyModelRef('openai/gpt-5.6-sol')).toEqual({
+      provider: 'gateway',
+      modelId: 'openai/gpt-5.6-sol',
+    })
+    expect(normalizeLegacyModelRef('gpt-5.6-sol')).toEqual({
+      provider: 'codex',
+      modelId: 'gpt-5.6-sol',
+    })
+  })
+
   test('filters Gateway models to supported language model providers', async () => {
     const gateway = {
       getAvailableModels: async () => ({
@@ -61,21 +73,34 @@ describe('provider model catalogs', () => {
         return Response.json({
           models: [
             {
-              slug: 'gpt-visible',
-              display_name: 'GPT Visible',
-              description: 'Available model',
+              slug: 'gpt-second',
+              display_name: 'GPT Second',
+              description: 'Second model',
               visibility: 'list',
               supported_in_api: true,
+              priority: 2,
+            },
+            {
+              slug: 'gpt-first',
+              display_name: 'GPT First',
+              description: 'First model',
+              visibility: 'list',
+              supported_in_api: true,
+              priority: 1,
             },
             {
               slug: 'gpt-hidden',
               display_name: 'GPT Hidden',
               visibility: 'hide',
+              supported_in_api: true,
+              priority: 0,
             },
             {
               slug: 'gpt-unsupported',
               display_name: 'GPT Unsupported',
+              visibility: 'list',
               supported_in_api: false,
+              priority: 0,
             },
           ],
         })
@@ -96,9 +121,16 @@ describe('provider model catalogs', () => {
     )
     expect(models).toEqual([
       {
-        id: 'gpt-visible',
-        name: 'GPT Visible',
-        description: 'Available model',
+        id: 'gpt-first',
+        name: 'GPT First',
+        description: 'First model',
+        priority: 1,
+      },
+      {
+        id: 'gpt-second',
+        name: 'GPT Second',
+        description: 'Second model',
+        priority: 2,
       },
     ])
   })
@@ -117,6 +149,12 @@ describe('provider model catalogs', () => {
         createRegistry: current =>
           createModelCatalogRegistry(current, { gateway, codex }),
       })
-    ).toEqual([{ id: 'codex-model', name: 'Codex' }])
+    ).toEqual([
+      {
+        id: 'codex-model',
+        name: 'Codex',
+        ref: { provider: 'codex', modelId: 'codex-model' },
+      },
+    ])
   })
 })

@@ -13,7 +13,6 @@ import {
   createRunSteeringInput,
   type SteeringMessage,
 } from '@/chat/harness'
-import { createProviderOptions } from '@/chat/harness/providers'
 import { createIdGeneratorWithPrefix, errorMessage } from '@/shared/utils'
 import { configuredSessionCatalog } from '@/storage/session-catalog'
 import {
@@ -238,9 +237,9 @@ export async function executeRun(
           model: input.command.model,
           features: step.state.config.features,
           instructions: step.state.config.instructions,
-          providerOptions: createProviderOptions({
+          providerOptions: {
             gateway: { byok: { openai: [] } },
-          }),
+          },
           steeringInput: steering,
         })
         const signal = joinSignals(

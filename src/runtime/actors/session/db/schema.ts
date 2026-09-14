@@ -1,11 +1,12 @@
 import type {
   FinishReason,
-  GatewayModelId,
   LanguageModelUsage,
   ProviderMetadata,
   UIMessage,
   UIMessageChunk,
 } from 'ai'
+import type { ModelProvider } from '@/auth/profile'
+import type { ModelRef } from '@/chat/harness/providers/model'
 import {
   index,
   integer,
@@ -64,8 +65,12 @@ export const runs = sqliteTable(
   {
     id: text('id').primaryKey(),
     idempotencyId: text('idempotency_id').notNull(),
-    model: text('model')
-      .$type<GatewayModelId>()
+    modelProvider: text('model_provider')
+      .$type<ModelProvider>()
+      .notNull()
+      .default('gateway'),
+    modelId: text('model')
+      .$type<ModelRef['modelId']>()
       .notNull()
       .default('openai/gpt-5.6-terra'),
     steps: text('steps', { mode: 'json' }).$type<RunStepMetadata[]>(),

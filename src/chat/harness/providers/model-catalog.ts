@@ -3,11 +3,13 @@ import type { ModelProvider, ProviderProfile } from '@/auth/profile'
 import { readProviderProfile } from '@/auth/profile'
 import { aiGateway, getGatewayModels } from './gateway'
 import { getCodexModels, type ModelCatalogFetch } from './openai'
+import { modelRefForProvider, type ModelRef } from './model'
 
 export type AvailableModel = {
   id: string
   name: string
   description?: string
+  priority?: number
 }
 
 export interface ModelCatalog {
@@ -78,10 +80,15 @@ export async function listModelsForActiveProvider(
     readProfile?: () => Promise<ProviderProfile>
     createRegistry?: (profile: ProviderProfile) => ModelCatalogRegistry
   } = {}
-): Promise<AvailableModel[]> {
+): Promise<Array<AvailableModel & { ref: ModelRef }>> {
   const profile = await (dependencies.readProfile ?? readProviderProfile)()
   const registry = (
     dependencies.createRegistry ?? createModelCatalogRegistry
   )(profile)
-  return registry[profile.activeProvider].listModels()
+  return (await registry[profile.activeProvider].listModels()).map(
+    model => ({
+      ...model,
+      ref: modelRefForProvider(profile.activeProvider, model.id),
+    })
+  )
 }

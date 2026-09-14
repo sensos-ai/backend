@@ -5,6 +5,7 @@ import {
   normalizeSessionTitle,
   shouldGenerateSessionTitle,
   titleMaxOutputTokens,
+  titleModelRef,
   TITLE_MODEL,
   userMessageText,
 } from '@/runtime/actors/session/title'
@@ -22,6 +23,14 @@ const usage = {
 describe('session titles', () => {
   test('uses the verified gateway nano model id', () => {
     expect(TITLE_MODEL).toBe('openai/gpt-5-nano')
+    expect(titleModelRef('gateway')).toEqual({
+      provider: 'gateway',
+      modelId: TITLE_MODEL,
+    })
+    expect(titleModelRef('codex')).toEqual({
+      provider: 'codex',
+      modelId: 'gpt-5.6-sol',
+    })
   })
 
   test('omits the unsupported output token limit for Codex', () => {

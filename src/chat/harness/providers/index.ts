@@ -10,6 +10,8 @@ import { aiGateway, createGatewayOptions, DEFAULT_MODEL } from './gateway'
 import { createTestLanguageModel } from './test-model'
 import { aiEmitter } from '@/shared/events'
 import { readProviderProfileSync } from '@/auth/profile'
+import type { ModelProvider } from '@/auth/profile'
+import type { CodexModelId, ModelRef } from './model'
 
 type StrictUnion<T> = T extends any
   ? string extends T
@@ -41,8 +43,11 @@ export type ProviderOptions = {
   [K in ProviderExclude<'openai'>]?: AIProviderOptions[keyof AIProviderOptions]
 }
 
-export function createProviderOptions(opts: ProviderOptions = {}) {
-  const isCodex = readProviderProfileSync().activeProvider === 'codex'
+export function createProviderOptions(
+  opts: ProviderOptions = {},
+  provider = readProviderProfileSync().activeProvider
+) {
+  const isCodex = provider === 'codex'
 
   const newOpts: ProviderOptions = {
     ...opts,
@@ -77,11 +82,15 @@ type ProviderRegistryConfig = {
 
 export const CODEX_DEFAULT_MODEL = 'gpt-5.6-sol'
 
-function codexModelId(modelId?: GatewayModelId): string {
+export function defaultModelRef(provider: ModelProvider): ModelRef {
+  return provider === 'codex'
+    ? { provider, modelId: CODEX_DEFAULT_MODEL }
+    : { provider, modelId: DEFAULT_MODEL }
+}
+
+function codexModelId(modelId?: CodexModelId): string {
   if (!modelId) return CODEX_DEFAULT_MODEL
-  return modelId.startsWith('openai/')
-    ? modelId.slice('openai/'.length)
-    : modelId
+  return modelId
 }
 
 export function providerRegistry(config?: ProviderRegistryConfig) {
@@ -102,14 +111,33 @@ export function providerRegistry(config?: ProviderRegistryConfig) {
       accountId: profile.codex?.accountId,
     }),
   })
+  const gateway = (modelId: GatewayModelId = DEFAULT_MODEL) =>
+    registry.languageModel(`gateway:${modelId}`)
+  const codexModel = (modelId?: CodexModelId) =>
+    registry.languageModel(`codex:${codexModelId(modelId)}`)
+  const resolveModel = (modelRef?: ModelRef) => {
+    const ref = modelRef ?? defaultModelRef(profile.activeProvider)
+    return {
+      provider: ref.provider,
+      model:
+        ref.provider === 'codex'
+          ? codexModel(ref.modelId)
+          : gateway(ref.modelId),
+    }
+  }
 
   return {
     registry,
     testModel: registry.languageModel('test:default'),
-    gateway: (modelId: GatewayModelId = DEFAULT_MODEL) =>
-      registry.languageModel(`gateway:${modelId}`),
-    codex: (modelId?: GatewayModelId) =>
-      registry.languageModel(`codex:${codexModelId(modelId)}`),
+    gateway,
+    codex: codexModel,
+    resolveModel,
     activeProvider: profile.activeProvider,
   }
 }
+
+export function languageModelForRef(modelRef?: ModelRef) {
+  return providerRegistry().resolveModel(modelRef)
+}
+
+export type { CodexModelId, ModelRef } from './model'

@@ -22,7 +22,10 @@ test('persists run state, frames, cancellation, title, and deletion', async () =
   const input = {
     runId: 'run_1',
     idempotencyId: 'request_1',
-    model: 'openai/gpt-5.6-sol' as const,
+    model: {
+      provider: 'gateway' as const,
+      modelId: 'openai/gpt-5.6-sol' as const,
+    },
     message: userMessage,
     assistantMessageId: 'msg_assistant',
   }
@@ -96,7 +99,8 @@ test('persists run state, frames, cancellation, title, and deletion', async () =
   expect(await handle.cancel('run_1')).toBeUndefined()
   expect(await handle.getRun('run_1')).toMatchObject({
     status: 'completed',
-    model: 'openai/gpt-5.6-sol',
+    modelProvider: 'gateway',
+    modelId: 'openai/gpt-5.6-sol',
     totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     responseMetadata: {
       id: 'response_1',

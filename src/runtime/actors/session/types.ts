@@ -12,7 +12,7 @@ import type {
 } from 'rivetkit'
 import type { WorkflowContextOf } from 'rivetkit/workflow'
 import type { AgentOs } from '@rivet-dev/agentos'
-import type { GatewayModelId, UIMessage } from 'ai'
+import type { UIMessage } from 'ai'
 import { z } from 'zod'
 import {
   harnessFeaturesSchema,
@@ -23,16 +23,16 @@ import type { InboxMessage } from './config'
 import type { SessionDatabaseProvider } from './db'
 import type { createRunSteeringInput } from '@/chat/harness'
 import type { SteeringMessage } from '@/chat/harness'
-
-const gatewayModelSchema = z.custom<GatewayModelId>(
-  value => typeof value === 'string'
-)
+import {
+  modelRefSchema,
+  type ModelRef,
+} from '@/chat/harness/providers/model'
 
 export const sessionInputSchema = z.object({
   sessionId: z.string().min(1).optional(),
   catalogRevision: z.number().int().nonnegative().optional(),
   cwd: z.string().min(1),
-  model: gatewayModelSchema.optional(),
+  model: modelRefSchema.optional(),
   instructions: z.string().optional(),
   initialMessages: z.array(z.custom<UIMessage>()).optional(),
   features: harnessFeaturesSchema.partial().optional(),
@@ -43,7 +43,7 @@ export type SessionInput = z.input<typeof sessionInputSchema>
 export type SessionConfig = {
   hostCwd: string
   guestCwd: string
-  model?: GatewayModelId
+  model?: ModelRef
   instructions?: string
   features: HarnessFeatures
 }
@@ -97,7 +97,7 @@ export type SessionActions = {
   deliver: SessionAction<[message: InboxMessage]>
   deleteSession: SessionAction
   getSession: SessionAction
-  setModel: SessionAction<[model: GatewayModelId]>
+  setModel: SessionAction<[model: ModelRef]>
   setFeatures: SessionAction<[features: HarnessFeatures]>
   getRun: SessionAction<[runId: string]>
   streamSnapshot: SessionAction<[runId: string, afterSeq?: number]>
