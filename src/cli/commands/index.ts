@@ -293,7 +293,8 @@ async function runChatSession(
       commands: [
         {
           name: '/interrupt',
-          description: 'Steer the active run now: /interrupt <message>',
+          argumentHint: '<message>',
+          description: 'Steer the active run with a new message',
           run: argument =>
             argument
               ? { prompt: argument, priority: 'now' as const }
@@ -301,7 +302,8 @@ async function runChatSession(
         },
         {
           name: '/queue',
-          description: 'Queue the next turn: /queue <message>',
+          argumentHint: '<message>',
+          description: 'Queue a message for the next turn',
           run: argument =>
             argument
               ? { prompt: argument, priority: 'next' as const }

@@ -125,6 +125,44 @@ describe('TerminalRenderer slash command completion', () => {
 
     await expect(prompt).resolves.toBe('/model')
   })
+
+  test('shows argument hints beside command names without repeating usage', async () => {
+    const input = new FakeInput()
+    const output = new FakeOutput()
+    const renderer = new TerminalRenderer({ input, output })
+    const prompt = renderer.readPrompt({
+      commands: [
+        {
+          name: '/interrupt',
+          argumentHint: '<message>',
+          description: 'Steer the active run with a new message',
+          run: () => undefined,
+        },
+        {
+          name: '/queue',
+          argumentHint: '<message>',
+          description: 'Queue a message for the next turn',
+          run: () => undefined,
+        },
+      ],
+    })
+
+    await Promise.resolve()
+    input.emit('data', Buffer.from('/'))
+    const frame = output.chunks.join('')
+    expect(frame).toContain(
+      '/interrupt <message>  Steer the active run with a new message'
+    )
+    expect(frame).toContain(
+      '/queue <message>      Queue a message for the next turn'
+    )
+    expect(frame).not.toContain(
+      'Steer the active run with a new message: /interrupt <message>'
+    )
+
+    input.emit('data', Buffer.from('\x03'))
+    await expect(prompt).rejects.toThrow('Interrupted')
+  })
 })
 
 describe('TerminalRenderer stream controls', () => {

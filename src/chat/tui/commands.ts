@@ -9,6 +9,7 @@ export type SlashCommandResult =
 
 export type SlashCommand = {
   name: `/${string}`
+  argumentHint?: `<${string}>`
   description: string
   run: (
     argument?: string

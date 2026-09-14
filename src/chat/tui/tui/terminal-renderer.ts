@@ -1039,7 +1039,9 @@ export class TerminalRenderer {
           ? this.#connectionStatus
           : this.#status,
       commandSuggestions: matches.map((command, index) => ({
-        name: command.name,
+        name: command.argumentHint
+          ? `${command.name} ${command.argumentHint}`
+          : command.name,
         description: command.description,
         selected: index === selectedCommandIndex,
       })),
