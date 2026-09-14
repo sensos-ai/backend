@@ -1,5 +1,12 @@
 import { createServer } from 'node:net'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createClient } from 'rivetkit/client'
@@ -49,6 +56,37 @@ async function reserveRuntimePort(): Promise<number> {
   throw new Error('Could not reserve an isolated Rivet port set')
 }
 
+async function bindRuntimePorts(port: number) {
+  const ports = [port, port + 1, port + 10]
+  const servers = ports.map(() => createServer())
+  try {
+    await Promise.all(
+      servers.map(
+        (server, index) =>
+          new Promise<void>((resolveListen, reject) => {
+            server.once('error', reject)
+            server.listen(ports[index], '127.0.0.1', resolveListen)
+          })
+      )
+    )
+    return servers
+  } catch (error) {
+    await closeServers(servers)
+    throw error
+  }
+}
+
+async function closeServers(servers: ReturnType<typeof createServer>[]) {
+  await Promise.all(
+    servers.map(
+      server =>
+        new Promise<void>(done =>
+          server.listening ? server.close(() => done()) : done()
+        )
+    )
+  )
+}
+
 function stripTerminal(value: string): string {
   // biome-ignore lint/complexity/useRegexLiterals: String form avoids literal control characters.
   const controlSequence = new RegExp('\\u001b\\[[0-?]*[ -/]*[@-~]', 'g')
@@ -69,8 +107,12 @@ export type CliE2E = {
   endpoint: string
   screen(): string
   sendLine(value: string): Promise<void>
+  sendControlC(): Promise<void>
+  detach(): Promise<number>
+  resume(): Promise<void>
   waitForScreen(text: string, timeoutMs?: number): Promise<string>
   waitForExit(timeoutMs?: number): Promise<number>
+  waitForNoOrphans(timeoutMs?: number): Promise<void>
   connect(
     clientId?: string
   ): ReturnType<
@@ -83,7 +125,8 @@ export type CliE2E = {
 
 export async function startCliE2E(
   name: string,
-  scenario: ScriptedScenario
+  scenario: ScriptedScenario,
+  options: { failRuntimeStartup?: boolean } = {}
 ): Promise<CliE2E> {
   const id = `${name.replaceAll(/[^a-z0-9]+/gi, '-')}-${crypto.randomUUID()}`
   const root = await mkdtemp(join(tmpdir(), 'sensos-e2e-'))
@@ -109,6 +152,9 @@ export async function startCliE2E(
 
   const gateway = startScriptedGateway(scenario)
   const port = await reserveRuntimePort()
+  const blockedRuntimePorts = options.failRuntimeStartup
+    ? await bindRuntimePorts(port)
+    : []
   const endpoint = `http://127.0.0.1:${port}`
   const env = {
     ...process.env,
@@ -116,7 +162,7 @@ export async function startCliE2E(
     XDG_CONFIG_HOME: config,
     XDG_STATE_HOME: state,
     SENSOS_RUNTIME_PORT: String(port),
-    SENSOS_RUNTIME_IDLE_TTL_MS: '0',
+    SENSOS_RUNTIME_IDLE_TTL_MS: '60000',
     SENSOS_GATEWAY_BASE_URL: gateway.url,
     AI_GATEWAY_API_KEY: 'e2e-scripted-gateway',
     SENSOS_AI_EVENT_LOG_PATH: join(logs, 'ai-events.log'),
@@ -126,28 +172,32 @@ export async function startCliE2E(
     SENSOS_E2E_WORKSPACE: workspace,
     TERM: 'xterm-256color',
   }
-  const expectProgram = [
-    'set timeout -1',
-    'log_user 1',
-    'spawn -noecho $env(SENSOS_E2E_EXECUTABLE) session $env(SENSOS_E2E_SESSION_ID) --cwd $env(SENSOS_E2E_WORKSPACE)',
-    'interact',
-    'set result [wait]',
-    'exit [lindex $result 3]',
-  ].join('; ')
-  const child = Bun.spawn(['/usr/bin/expect', '-c', expectProgram], {
-    cwd: workspace,
-    env,
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
   let output = ''
+  let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
+  const captures: Promise<void>[] = []
   const capture = async (stream: ReadableStream<Uint8Array>) => {
     for await (const chunk of stream)
       output += new TextDecoder().decode(chunk)
   }
-  const stdout = capture(child.stdout)
-  const stderr = capture(child.stderr)
+  const spawnCli = (command: 'session' | 'resume') => {
+    const expectProgram = [
+      'set timeout -1',
+      'log_user 1',
+      `spawn -noecho $env(SENSOS_E2E_EXECUTABLE) ${command} $env(SENSOS_E2E_SESSION_ID) --cwd $env(SENSOS_E2E_WORKSPACE)`,
+      'interact',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ].join('; ')
+    child = Bun.spawn(['/usr/bin/expect', '-c', expectProgram], {
+      cwd: workspace,
+      env,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    captures.push(capture(child.stdout), capture(child.stderr))
+  }
+  spawnCli('session')
   let stopped = false
 
   const api: CliE2E = {
@@ -164,6 +214,22 @@ export async function startCliE2E(
       child.stdin.write('\r')
       await child.stdin.flush()
     },
+    async sendControlC() {
+      child.stdin.write('\x03')
+      await child.stdin.flush()
+    },
+    async detach() {
+      child.stdin.write('\x03')
+      await child.stdin.flush()
+      return api.waitForExit()
+    },
+    async resume() {
+      if (child.exitCode === null) {
+        throw new Error('Cannot resume while the original CLI is running')
+      }
+      output += '\n--- resumed CLI ---\n'
+      spawnCli('resume')
+    },
     async waitForScreen(text, timeoutMs = 15_000) {
       return waitForValue(api.screen, value => value.includes(text), {
         description: `terminal output containing ${JSON.stringify(text)}`,
@@ -178,6 +244,76 @@ export async function startCliE2E(
         }),
       ])
     },
+    async waitForNoOrphans(timeoutMs = 15_000) {
+      const directory = join(state, 'sensos', 'runtime', 'supervisor')
+      const statePath = join(directory, 'state.json')
+      const socketPath = join(directory, 'control.sock')
+      let supervisorPid: number | undefined
+      try {
+        supervisorPid = (
+          JSON.parse(await readFile(statePath, 'utf8')) as { pid?: number }
+        ).pid
+      } catch {
+        // A fast shutdown may remove state before observation begins.
+      }
+      type OrphanObservation = {
+        stateExists: boolean
+        socketExists: boolean
+        supervisorAlive: boolean
+        portsAvailable: boolean
+      }
+      let lastObservation: OrphanObservation | undefined
+      const observe = async (): Promise<OrphanObservation> => {
+        const exists = async (path: string) => {
+          try {
+            await stat(path)
+            return true
+          } catch {
+            return false
+          }
+        }
+        let supervisorAlive = false
+        if (supervisorPid) {
+          try {
+            process.kill(supervisorPid, 0)
+            supervisorAlive = true
+          } catch {
+            // The recorded supervisor exited.
+          }
+        }
+        let portsAvailable = false
+        try {
+          const probes = await bindRuntimePorts(port)
+          await closeServers(probes)
+          portsAvailable = true
+        } catch {
+          // The engine is still releasing a listener.
+        }
+        return {
+          stateExists: await exists(statePath),
+          socketExists: await exists(socketPath),
+          supervisorAlive,
+          portsAvailable,
+        }
+      }
+      try {
+        await waitForValue(
+          async () => {
+            lastObservation = await observe()
+            return lastObservation
+          },
+          value => !value.supervisorAlive && value.portsAvailable,
+          {
+            description: 'CLI and runtime resources to be released',
+            timeoutMs,
+          }
+        )
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(lastObservation)}`
+        )
+      }
+    },
     connect(clientId = `e2e-observer-${crypto.randomUUID()}`) {
       return createClient<typeof registry>(endpoint).session.getOrCreate(
         [sessionId],
@@ -191,6 +327,7 @@ export async function startCliE2E(
       if (child.exitCode === null) child.kill('SIGTERM')
       await Promise.race([child.exited, Bun.sleep(3_000)])
       if (child.exitCode === null) child.kill('SIGKILL')
+      await closeServers(blockedRuntimePorts)
       const runtimeStop = Bun.spawn([executable, 'runtime', 'stop'], {
         env,
         stdout: 'ignore',
@@ -198,7 +335,7 @@ export async function startCliE2E(
       })
       await Promise.race([runtimeStop.exited, Bun.sleep(8_000)])
       await gateway.stop()
-      await Promise.allSettled([stdout, stderr])
+      await Promise.allSettled(captures)
       const artifacts = resolve('tests/e2e/artifacts')
       await mkdir(artifacts, { recursive: true })
       await Promise.all([
@@ -221,7 +358,10 @@ export async function startCliE2E(
     },
   }
   try {
-    await api.waitForScreen('Agent ready', 20_000)
+    await api.waitForScreen(
+      options.failRuntimeStartup ? 'Waking agent' : 'Agent ready',
+      20_000
+    )
     return api
   } catch (error) {
     await api.stop()
