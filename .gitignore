@@ -23,10 +23,10 @@ archive
 .vscode
 .vercel
 
-#claude
+# ai
 CLAUDE.local.md
 .claude/worktrees/
 .agents/worktrees/
+.agents/plans
 .claude/plans/
 .claude/settings.local.json
-plans
