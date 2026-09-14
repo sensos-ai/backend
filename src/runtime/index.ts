@@ -7,16 +7,25 @@ import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import { prepareAgentOsAssets } from './agentos-assets'
 import { registry } from './actors/registry'
 import { prepareRivetEngine } from './assets'
+import {
+  DEFAULT_IDLE_TTL_MS,
+  HEARTBEAT_INTERVAL_MS,
+  LEASE_TIMEOUT_MS,
+  MAX_IDLE_TTL_MS,
+  RUNTIME_BUILD_ID,
+  RUNTIME_ENDPOINT,
+  RUNTIME_HOST,
+  RUNTIME_PORT,
+  RUNTIME_PROTOCOL_VERSION,
+} from './constants'
 
-export const RUNTIME_HOST = '127.0.0.1'
-export const RUNTIME_PORT = 6420
-export const RUNTIME_ENDPOINT = `http://${RUNTIME_HOST}:${RUNTIME_PORT}`
-
-const RUNTIME_VERSION = '1'
-const DEFAULT_IDLE_TTL_MS = 5 * 60_000
-const MAX_IDLE_TTL_MS = 24 * 60 * 60_000
-const HEARTBEAT_INTERVAL_MS = 30_000
-const LEASE_TIMEOUT_MS = 90_000
+export {
+  RUNTIME_BUILD_ID,
+  RUNTIME_ENDPOINT,
+  RUNTIME_HOST,
+  RUNTIME_PORT,
+  RUNTIME_PROTOCOL_VERSION,
+} from './constants'
 const createLeaseId = createIdGeneratorWithPrefix('lease')
 const createOwnershipToken = createIdGeneratorWithPrefix('runtime')
 
@@ -32,8 +41,18 @@ type RuntimeResponse = {
   ready?: boolean
   pid?: number
   leases?: number
-  version?: string
+  protocolVersion?: string
+  buildId?: string
   error?: string
+}
+
+export function isCompatibleRuntime(
+  response: Pick<RuntimeResponse, 'protocolVersion' | 'buildId'>
+): boolean {
+  return (
+    response.protocolVersion === RUNTIME_PROTOCOL_VERSION &&
+    response.buildId === RUNTIME_BUILD_ID
+  )
 }
 
 type RuntimePaths = {
@@ -173,7 +192,8 @@ async function hasLiveRecordedSupervisor(
     const state = JSON.parse(await readFile(paths.state, 'utf8')) as {
       pid?: number
       token?: string
-      version?: string
+      protocolVersion?: string
+      buildId?: string
     }
     if (!state.pid || !state.token) return false
     process.kill(state.pid, 0)
@@ -214,16 +234,21 @@ async function startSupervisor(root: string): Promise<void> {
   const paths = runtimePaths(root)
   const releaseLock = await acquireStartupLock(paths)
   try {
+    let existing: RuntimeResponse | undefined
     try {
-      const existing = await requestRuntime(
+      existing = await requestRuntime(
         paths.socket,
         { type: 'status' },
         500
       )
-      if (existing.ok && existing.version === RUNTIME_VERSION) return
+    } catch {
+      // No supervisor is listening on the recorded socket.
+    }
+    if (existing?.ok) {
+      if (isCompatibleRuntime(existing)) return
       if ((existing.leases ?? 0) > 0) {
         throw new Error(
-          'Runtime version changed while active clients still hold leases'
+          'The local runtime protocol or build changed while active chats still hold leases. Close those chats or run `sensos runtime stop`, then try again.'
         )
       }
       await requestRuntime(paths.socket, { type: 'stop' }, 6_000)
@@ -236,8 +261,6 @@ async function startSupervisor(root: string): Promise<void> {
           break
         }
       }
-    } catch {
-      // No compatible supervisor is listening.
     }
 
     if (await hasLiveRecordedSupervisor(paths)) {
@@ -271,7 +294,7 @@ async function startSupervisor(root: string): Promise<void> {
         const status = await requestRuntime(paths.socket, {
           type: 'status',
         })
-        if (status.ok && status.version === RUNTIME_VERSION) return
+        if (status.ok && isCompatibleRuntime(status)) return
       } catch {
         // The detached supervisor is still starting.
       }
@@ -342,7 +365,13 @@ export async function runtimeStatus(
       500
     )
   } catch {
-    return { ok: true, ready: false, leases: 0, version: RUNTIME_VERSION }
+    return {
+      ok: true,
+      ready: false,
+      leases: 0,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      buildId: RUNTIME_BUILD_ID,
+    }
   }
 }
 
@@ -382,7 +411,8 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
     JSON.stringify({
       pid: process.pid,
       token: ownershipToken,
-      version: RUNTIME_VERSION,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      buildId: RUNTIME_BUILD_ID,
       port: RUNTIME_PORT,
       socket: paths.socket,
       startedAt: Date.now(),
@@ -457,7 +487,8 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
               ]),
               pid: process.pid,
               leases: leases.size,
-              version: RUNTIME_VERSION,
+              protocolVersion: RUNTIME_PROTOCOL_VERSION,
+              buildId: RUNTIME_BUILD_ID,
             })
             return
           }

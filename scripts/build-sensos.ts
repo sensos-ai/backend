@@ -1,6 +1,7 @@
 import type { BunPlugin } from 'bun'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
+import { computeRuntimeSourceIdentity } from '../src/runtime/build-identity'
 
 type ReleaseTarget =
   | 'darwin-arm64'
@@ -75,6 +76,14 @@ const assetManifest = Object.fromEntries(
   )
 )
 
+const runtimeBuildId = createHash('sha256')
+  .update(computeRuntimeSourceIdentity(resolve('.')))
+  .update('\0')
+  .update(releaseTarget)
+  .update('\0')
+  .update(JSON.stringify(assetManifest))
+  .digest('hex')
+
 const makeNativeRuntimeBundlable: BunPlugin = {
   name: 'bundle-rivetkit-native-runtime',
   setup(build) {
@@ -140,6 +149,7 @@ const result = await Bun.build({
   sourcemap: 'linked',
   define: {
     __SENSOS_ASSET_MANIFEST__: JSON.stringify(assetManifest),
+    __SENSOS_RUNTIME_BUILD_ID__: JSON.stringify(runtimeBuildId),
   },
   compile: {
     outfile: 'dist/sensos',

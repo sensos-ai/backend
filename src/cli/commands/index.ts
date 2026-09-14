@@ -541,7 +541,7 @@ async function main(): Promise<void> {
     const status = await runtimeStatus(root)
     console.log(
       status.ready
-        ? `Runtime ready (pid ${status.pid}, ${status.leases ?? 0} leases)`
+        ? `Runtime ready (pid ${status.pid}, ${status.leases ?? 0} leases, protocol ${status.protocolVersion ?? 'unknown'}, build ${status.buildId?.slice(0, 12) ?? 'unknown'})`
         : 'Runtime stopped'
     )
     return

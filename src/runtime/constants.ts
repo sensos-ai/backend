@@ -1,0 +1,18 @@
+import { resolve } from 'node:path'
+import { computeRuntimeSourceIdentity } from './build-identity'
+
+declare const __SENSOS_RUNTIME_BUILD_ID__: string
+
+export const RUNTIME_HOST = '127.0.0.1'
+export const RUNTIME_PORT = 6420
+export const RUNTIME_ENDPOINT = `http://${RUNTIME_HOST}:${RUNTIME_PORT}`
+export const RUNTIME_PROTOCOL_VERSION =
+  process.env.SENSOS_RUNTIME_PROTOCOL_VERSION?.trim() || '1'
+export const RUNTIME_BUILD_ID =
+  typeof __SENSOS_RUNTIME_BUILD_ID__ === 'undefined'
+    ? computeRuntimeSourceIdentity(resolve(import.meta.dir, '../..'))
+    : __SENSOS_RUNTIME_BUILD_ID__
+export const DEFAULT_IDLE_TTL_MS = 5 * 60_000
+export const MAX_IDLE_TTL_MS = 24 * 60 * 60_000
+export const HEARTBEAT_INTERVAL_MS = 30_000
+export const LEASE_TIMEOUT_MS = 90_000
