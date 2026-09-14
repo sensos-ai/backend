@@ -1,12 +1,18 @@
-import { expect, onTestFinished, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import type { UIMessage } from 'ai'
-import { createRivetTestClient } from '../../../fixtures/rivet/client'
+import { queryTestActor } from '../../../fixtures/rivet/query-test-actor'
+import {
+  createRivetTest,
+  createTestRegistry,
+} from '../../../helpers/rivet-test'
 
 test('submit is idempotent and owns one durable active run', async () => {
-  const client = createRivetTestClient()
-  onTestFinished(() => client.dispose())
+  const { client, actorKey } = await createRivetTest(
+    { name: 'durable query behavior' },
+    () => createTestRegistry({ queryTestActor })
+  )
   const handle = client.queryTestActor.getOrCreate([
-    `durability-${crypto.randomUUID()}`,
+    actorKey('durability'),
   ])
   const userMessage: UIMessage = {
     id: 'msg_user',
