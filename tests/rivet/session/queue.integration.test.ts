@@ -1,13 +1,18 @@
-import { expect, onTestFinished, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import type { UIMessage } from 'ai'
-import { createIdGeneratorWithPrefix } from '@/shared/utils'
-import { createRivetTestClient } from '../../fixtures/rivet/client'
+import { sessionAgent } from '@/runtime/actors/session'
 import type {
   DeliveryRoutedEvent,
   FrameEvent,
   InboxMessage,
   StatusChangedEvent,
 } from '@/runtime/actors/session/config'
+import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import {
+  createRivetTest,
+  createTestRegistry,
+} from '../../helpers/rivet-test'
+import { waitForEvent, waitForValue } from '../../helpers/wait'
 
 const createTestId = createIdGeneratorWithPrefix('queue_test')
 
@@ -29,42 +34,30 @@ function inbox(
   }
 }
 
-function waitForEvent<T>(
-  subscribe: (listener: (event: T) => void) => () => void,
-  predicate: (event: T) => boolean
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      unsubscribe()
-      reject(new Error('Timed out waiting for actor event'))
-    }, 10_000)
-    const unsubscribe = subscribe(event => {
-      if (!predicate(event)) return
-      clearTimeout(timer)
-      unsubscribe()
-      resolve(event)
-    })
-  })
+async function createSessionTest(name: string) {
+  return createRivetTest({ name }, () =>
+    createTestRegistry({ session: sessionAgent })
+  )
 }
 
 async function waitForCompletedRun(
   getRun: (runId: string) => Promise<{ status: string } | undefined>,
   runId: string
 ): Promise<void> {
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    if ((await getRun(runId))?.status === 'completed') return
-    await Bun.sleep(25)
-  }
-  throw new Error(`Timed out waiting for run ${runId} to complete`)
+  await waitForValue(
+    () => getRun(runId),
+    run => run?.status === 'completed',
+    { description: `run ${runId} to complete` }
+  )
 }
 
-test('completable run queue durably creates and deduplicates a run', async () => {
-  const client = createRivetTestClient()
-  onTestFinished(() => client.dispose())
-  const handle = client.session.getOrCreate([createTestId()], {
+test('run submission persists once and deduplicates retries', async () => {
+  const { client, actorKey } = await createSessionTest(
+    'run submission deduplication'
+  )
+  const handle = client.session.getOrCreate([actorKey('session')], {
     createWithInput: { cwd: process.cwd() },
-    params: { clientId: createTestId() },
+    params: { clientId: actorKey('client') },
   })
   const message: UIMessage = {
     id: createTestId(),
@@ -87,8 +80,7 @@ test('completable run queue durably creates and deduplicates a run', async () =>
   })
   if (!first.response) throw new Error('Missing first queue completion')
 
-  const persisted = await handle.getRun(first.response.runId)
-  expect(persisted).toMatchObject({
+  expect(await handle.getRun(first.response.runId)).toMatchObject({
     id: first.response.runId,
     idempotencyId: command.idempotencyId,
     model: command.model,
@@ -107,110 +99,72 @@ test('completable run queue durably creates and deduplicates a run', async () =>
       runId: first.response.runId,
     },
   })
-  expect((await handle.getSession()).messages).toEqual(
-    expect.arrayContaining([message])
-  )
   expect(
     (await handle.getSession()).messages.filter(
       (value: UIMessage) => value.id === message.id
     )
   ).toHaveLength(1)
+}, 20_000)
+
+test('now delivery interrupts the active run and starts a successor', async () => {
+  const { client, actorKey, cleanup } = await createSessionTest(
+    'now actor delivery'
+  )
   const connection = client.session
-    .getOrCreate([createTestId()], {
+    .getOrCreate([actorKey('session')], {
       createWithInput: { cwd: process.cwd() },
     })
-    .connect({ clientId: createTestId() })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
 
-  const initialDelivery = inbox('adaptive', 'start the first turn')
+  const initial = inbox('adaptive', 'start the first turn')
   const firstStarted = waitForEvent<DeliveryRoutedEvent>(
     listener => connection.on('deliveryRouted', listener),
-    event => event.id === initialDelivery.id && event.status === 'started'
+    event => event.id === initial.id && event.status === 'started',
+    { description: 'initial delivery to start' }
   )
-  const firstRunning = waitForEvent<StatusChangedEvent>(
-    listener => connection.on('statusChanged', listener),
-    event => event.runStatus === 'running'
-  )
-  await connection.deliver(initialDelivery)
-  const started = await firstStarted
-  await firstRunning
-  expect(started.runId).toMatch(/^run_/)
-
-  const partialAssistantOutput = waitForEvent<FrameEvent>(
+  const firstFrame = waitForEvent<FrameEvent>(
     listener => connection.on('frame', listener),
-    event =>
-      event.runId === started.runId && event.chunk.type === 'text-delta'
+    event => event.chunk.type === 'text-delta',
+    { description: 'initial run output' }
   )
-  await partialAssistantOutput
+  await connection.deliver(initial)
+  const interruptedRunId = (await firstStarted).runId
+  if (!interruptedRunId) throw new Error('Missing initial run id')
+  await firstFrame
 
   const steering = inbox('now', 'interrupt into a new turn')
-  const steeredReceipt = waitForEvent<DeliveryRoutedEvent>(
+  const steered = waitForEvent<DeliveryRoutedEvent>(
     listener => connection.on('deliveryRouted', listener),
-    event => event.id === steering.id && event.status === 'steered'
+    event => event.id === steering.id && event.status === 'steered',
+    { description: 'now delivery to steer the active run' }
   )
   const interrupted = waitForEvent<StatusChangedEvent>(
     listener => connection.on('statusChanged', listener),
     event =>
-      event.runId === started.runId && event.runStatus === 'interrupted'
+      event.runId === interruptedRunId &&
+      event.runStatus === 'interrupted',
+    { description: 'active run to become interrupted' }
   )
-  const interruptStarted = waitForEvent<DeliveryRoutedEvent>(
+  const successorStarted = waitForEvent<DeliveryRoutedEvent>(
     listener => connection.on('deliveryRouted', listener),
-    event => event.id === steering.id && event.status === 'started'
-  )
-  const successorRunning = waitForEvent<StatusChangedEvent>(
-    listener => connection.on('statusChanged', listener),
-    event => event.runId !== started.runId && event.runStatus === 'running'
+    event => event.id === steering.id && event.status === 'started',
+    { description: 'steering delivery to start its successor' }
   )
   await connection.deliver(steering)
-  expect((await steeredReceipt).runId).toBe(started.runId)
+
+  expect((await steered).runId).toBe(interruptedRunId)
   await interrupted
-  const successor = await interruptStarted
-  expect(successor.runId).not.toBe(started.runId)
-
-  if (!successor.runId)
-    throw new Error('Missing interrupt successor run id')
-  expect((await successorRunning).runId).toBe(successor.runId)
-
-  const adaptiveSteering = inbox('adaptive', 'adapt this same turn')
-  const adaptiveReceipt = waitForEvent<DeliveryRoutedEvent>(
-    listener => connection.on('deliveryRouted', listener),
-    event => event.id === adaptiveSteering.id && event.status === 'steered'
-  )
-  await connection.deliver(adaptiveSteering)
-  expect((await adaptiveReceipt).runId).toBe(successor.runId)
-
-  const next = inbox('next', 'run only after the first turn')
-  const queuedReceipt = waitForEvent<DeliveryRoutedEvent>(
-    listener => connection.on('deliveryRouted', listener),
-    event => event.id === next.id && event.status === 'queued'
-  )
-  const nextStarted = waitForEvent<DeliveryRoutedEvent>(
-    listener => connection.on('deliveryRouted', listener),
-    event => event.id === next.id && event.status === 'started'
-  )
-  await connection.deliver(next)
-  await queuedReceipt
-  expect(
-    (await connection.getSession()).messages.some(
-      (message: UIMessage) => message.id === next.id
-    )
-  ).toBe(false)
-
+  const successorRunId = (await successorStarted).runId
+  expect(successorRunId).not.toBe(interruptedRunId)
+  if (!successorRunId) throw new Error('Missing successor run id')
   await waitForCompletedRun(
     runId => connection.getRun(runId),
-    successor.runId
-  )
-  const second = await nextStarted
-  expect(second.runId).not.toBe(successor.runId)
-
-  if (!second.runId) throw new Error('Missing second run id')
-  await waitForCompletedRun(
-    runId => connection.getRun(runId),
-    second.runId
+    successorRunId
   )
 
   const messages = (await connection.getSession()).messages
-  if (!started.runId) throw new Error('Missing first run id')
-  const interruptedRun = await connection.getRun(started.runId)
+  const interruptedRun = await connection.getRun(interruptedRunId)
   if (!interruptedRun) throw new Error('Missing interrupted run')
   const messageIds = messages.map((message: UIMessage) => message.id)
   const cutoff = messages.find(
@@ -226,19 +180,110 @@ test('completable run queue durably creates and deduplicates a run', async () =>
   ).toBe(true)
   expect(
     messageIds.indexOf(interruptedRun.assistantMessageId)
-  ).toBeGreaterThan(messageIds.indexOf(initialDelivery.id))
+  ).toBeGreaterThan(messageIds.indexOf(initial.id))
   expect(messageIds.indexOf(steering.id)).toBeGreaterThan(
     messageIds.indexOf(interruptedRun.assistantMessageId)
   )
+}, 20_000)
+
+test('adaptive delivery steers the active run without replacing it', async () => {
+  const { client, actorKey, cleanup } = await createSessionTest(
+    'adaptive actor delivery'
+  )
+  const connection = client.session
+    .getOrCreate([actorKey('session')], {
+      createWithInput: { cwd: process.cwd() },
+    })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
+
+  const initial = inbox('adaptive', 'start the first turn')
+  const started = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === initial.id && event.status === 'started',
+    { description: 'initial delivery to start' }
+  )
+  const firstFrame = waitForEvent<FrameEvent>(
+    listener => connection.on('frame', listener),
+    event => event.chunk.type === 'text-delta',
+    { description: 'active run output' }
+  )
+  await connection.deliver(initial)
+  const runId = (await started).runId
+  if (!runId) throw new Error('Missing active run id')
+  await firstFrame
+
+  const adaptive = inbox('adaptive', 'adapt this same turn')
+  const receipt = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === adaptive.id && event.status === 'steered',
+    { description: 'adaptive delivery to steer the active run' }
+  )
+  await connection.deliver(adaptive)
+  expect((await receipt).runId).toBe(runId)
+  await waitForCompletedRun(id => connection.getRun(id), runId)
+
+  expect(
+    (await connection.getSession()).messages.map(
+      (message: UIMessage) => message.id
+    )
+  ).toEqual(expect.arrayContaining([initial.id, adaptive.id]))
+}, 20_000)
+
+test('next delivery waits for the active run before starting once', async () => {
+  const { client, actorKey, cleanup } = await createSessionTest(
+    'next actor delivery'
+  )
+  const connection = client.session
+    .getOrCreate([actorKey('session')], {
+      createWithInput: { cwd: process.cwd() },
+    })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
+
+  const initial = inbox('adaptive', 'start the first turn')
+  const started = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === initial.id && event.status === 'started',
+    { description: 'initial delivery to start' }
+  )
+  const firstFrame = waitForEvent<FrameEvent>(
+    listener => connection.on('frame', listener),
+    event => event.chunk.type === 'text-delta',
+    { description: 'active run output' }
+  )
+  await connection.deliver(initial)
+  const firstRunId = (await started).runId
+  if (!firstRunId) throw new Error('Missing first run id')
+  await firstFrame
+
+  const next = inbox('next', 'run only after the first turn')
+  const queued = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === next.id && event.status === 'queued',
+    { description: 'next delivery to queue' }
+  )
+  const nextStarted = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === next.id && event.status === 'started',
+    { description: 'next delivery to start' }
+  )
+  await connection.deliver(next)
+  await queued
+  expect(
+    (await connection.getSession()).messages.some(
+      (message: UIMessage) => message.id === next.id
+    )
+  ).toBe(false)
+
+  await waitForCompletedRun(id => connection.getRun(id), firstRunId)
+  const nextRunId = (await nextStarted).runId
+  expect(nextRunId).not.toBe(firstRunId)
+  if (!nextRunId) throw new Error('Missing next run id')
+  await waitForCompletedRun(id => connection.getRun(id), nextRunId)
+
+  const messages = (await connection.getSession()).messages
   expect(
     messages.filter((message: UIMessage) => message.id === next.id)
   ).toHaveLength(1)
-  expect(messageIds).toEqual(
-    expect.arrayContaining([
-      initialDelivery.id,
-      steering.id,
-      adaptiveSteering.id,
-      next.id,
-    ])
-  )
-}, 30_000)
+}, 20_000)

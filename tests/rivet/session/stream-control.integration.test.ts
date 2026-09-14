@@ -1,7 +1,7 @@
-import { expect, onTestFinished, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { SessionChatTransport } from '@/chat/transport'
-import { createRivetTestClient } from '../../fixtures/rivet/client'
+import { sessionAgent } from '@/runtime/actors/session'
 import type {
   DeliveryRoutedEvent,
   FrameEvent,
@@ -9,6 +9,11 @@ import type {
   StatusChangedEvent,
 } from '@/runtime/actors/session/config'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import {
+  createRivetTest,
+  createTestRegistry,
+} from '../../helpers/rivet-test'
+import { waitForEvent, waitForValue } from '../../helpers/wait'
 
 const createTestId = createIdGeneratorWithPrefix('stream_control')
 
@@ -30,53 +35,44 @@ function inbox(
   }
 }
 
-function waitForEvent<T>(
-  subscribe: (listener: (event: T) => void) => () => void,
-  predicate: (event: T) => boolean
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      unsubscribe()
-      reject(new Error('Timed out waiting for actor event'))
-    }, 10_000)
-    const unsubscribe = subscribe(event => {
-      if (!predicate(event)) return
-      clearTimeout(timer)
-      unsubscribe()
-      resolve(event)
-    })
-  })
-}
-
 async function collect(stream: ReadableStream<UIMessageChunk>) {
   const chunks: UIMessageChunk[] = []
   for await (const chunk of stream) chunks.push(chunk)
   return chunks
 }
 
-test('active streams survive disconnect and explicit stop persists only the cutoff', async () => {
-  const client = createRivetTestClient()
-  onTestFinished(() => client.dispose())
+async function createSessionTest(name: string) {
+  return createRivetTest({ name }, () =>
+    createTestRegistry({ session: sessionAgent })
+  )
+}
 
-  const resumableHandle = client.session.getOrCreate([createTestId()], {
+test('actor stream advances while disconnected and replays on reconnect', async () => {
+  const { client, actorKey, cleanup } = await createSessionTest(
+    'stream disconnect recovery'
+  )
+  const handle = client.session.getOrCreate([actorKey('session')], {
     createWithInput: { cwd: process.cwd() },
   })
-  const firstConnection = resumableHandle.connect({
-    clientId: createTestId(),
-  })
+  const firstConnection = handle.connect({ clientId: actorKey('client') })
+  cleanup(() => firstConnection.dispose())
+
   const delivery = inbox('keep generating after the client disconnects')
   const started = waitForEvent<DeliveryRoutedEvent>(
     listener => firstConnection.on('deliveryRouted', listener),
-    event => event.id === delivery.id && event.status === 'started'
+    event => event.id === delivery.id && event.status === 'started',
+    { description: 'disconnect test run to start' }
   )
   const firstFrame = waitForEvent<FrameEvent>(
     listener => firstConnection.on('frame', listener),
-    event => event.chunk.type === 'text-delta'
+    event => event.chunk.type === 'text-delta',
+    { description: 'disconnect test output' }
   )
   await firstConnection.deliver(delivery)
   const runId = (await started).runId
   if (!runId) throw new Error('Missing active run id')
   const frameBeforeDisconnect = await firstFrame
+
   const queuedDelivery = inbox(
     'run this after the disconnected turn',
     'next'
@@ -87,20 +83,28 @@ test('active streams survive disconnect and explicit stop persists only the cuto
   })
   await firstConnection.dispose()
 
-  await Bun.sleep(150)
-  const resumedConnection = resumableHandle.connect({
-    clientId: createTestId(),
+  const resumedConnection = handle.connect({
+    clientId: actorKey('client'),
   })
-  const resumedTransport = new SessionChatTransport(resumedConnection)
+  cleanup(() => resumedConnection.dispose())
+  const advancedAfterDisconnect = waitForEvent<FrameEvent>(
+    listener => resumedConnection.on('frame', listener),
+    event =>
+      event.runId === runId && event.seq > frameBeforeDisconnect.seq,
+    { description: 'stream frames to advance after disconnect' }
+  )
+  await advancedAfterDisconnect
   const queuedStarted = waitForEvent<DeliveryRoutedEvent>(
     listener => resumedConnection.on('deliveryRouted', listener),
-    event => event.id === queuedDelivery.id && event.status === 'started'
+    event => event.id === queuedDelivery.id && event.status === 'started',
+    { description: 'queued delivery to start after reconnect' }
   )
-  const resumed = await resumedTransport.reconnectToStream({
-    chatId: 'resumed-chat',
-  })
+  const resumed = await new SessionChatTransport(
+    resumedConnection
+  ).reconnectToStream({ chatId: 'resumed-chat' })
   expect(resumed).not.toBeNull()
   if (!resumed) throw new Error('Expected a resumable stream')
+
   const replayed = await collect(resumed)
   expect(replayed.length).toBeGreaterThan(frameBeforeDisconnect.seq)
   expect(replayed.at(-1)?.type).toBe('finish')
@@ -108,63 +112,68 @@ test('active streams survive disconnect and explicit stop persists only the cuto
     id: runId,
     status: 'completed',
   })
+
   const queuedRunId = (await queuedStarted).runId
   if (!queuedRunId) throw new Error('Missing queued run id')
-  const queuedDeadline = Date.now() + 10_000
-  while (
-    (await resumedConnection.getRun(queuedRunId))?.status !== 'completed'
-  ) {
-    if (Date.now() >= queuedDeadline) {
-      throw new Error('Timed out waiting for queued run after reconnect')
-    }
-    await Bun.sleep(25)
-  }
-  const resumedMessages = (await resumedConnection.getSession()).messages
-  expect(resumedMessages.map((message: UIMessage) => message.id)).toEqual([
+  await waitForValue(
+    () => resumedConnection.getRun(queuedRunId),
+    run => run?.status === 'completed',
+    { description: 'queued run after reconnect to complete' }
+  )
+
+  const messages = (await resumedConnection.getSession()).messages
+  expect(messages.map((message: UIMessage) => message.id)).toEqual([
     delivery.message.id,
     (await resumedConnection.getRun(runId))?.assistantMessageId,
     queuedDelivery.message.id,
     (await resumedConnection.getRun(queuedRunId))?.assistantMessageId,
   ])
+}, 20_000)
 
-  const stoppableHandle = client.session.getOrCreate([createTestId()], {
-    createWithInput: { cwd: process.cwd() },
-  })
-  const stoppableConnection = stoppableHandle.connect({
-    clientId: createTestId(),
-  })
-  const stopDelivery = inbox('generate until explicitly stopped')
-  const stopStarted = waitForEvent<DeliveryRoutedEvent>(
-    listener => stoppableConnection.on('deliveryRouted', listener),
-    event => event.id === stopDelivery.id && event.status === 'started'
+test('transport stop cancels the active actor run and persists its cutoff', async () => {
+  const { client, actorKey, cleanup } = await createSessionTest(
+    'transport stop behavior'
+  )
+  const connection = client.session
+    .getOrCreate([actorKey('session')], {
+      createWithInput: { cwd: process.cwd() },
+    })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
+
+  const delivery = inbox('generate until explicitly stopped')
+  const started = waitForEvent<DeliveryRoutedEvent>(
+    listener => connection.on('deliveryRouted', listener),
+    event => event.id === delivery.id && event.status === 'started',
+    { description: 'stoppable run to start' }
   )
   const partialOutput = waitForEvent<FrameEvent>(
-    listener => stoppableConnection.on('frame', listener),
-    event => event.chunk.type === 'text-delta'
+    listener => connection.on('frame', listener),
+    event => event.chunk.type === 'text-delta',
+    { description: 'stoppable run output' }
   )
-  await stoppableConnection.deliver(stopDelivery)
-  const stoppedRunId = (await stopStarted).runId
-  if (!stoppedRunId) throw new Error('Missing stoppable run id')
+  await connection.deliver(delivery)
+  const runId = (await started).runId
+  if (!runId) throw new Error('Missing stoppable run id')
   await partialOutput
+
   const cancelled = waitForEvent<StatusChangedEvent>(
-    listener => stoppableConnection.on('statusChanged', listener),
-    event =>
-      event.runId === stoppedRunId && event.runStatus === 'cancelled'
+    listener => connection.on('statusChanged', listener),
+    event => event.runId === runId && event.runStatus === 'cancelled',
+    { description: 'stopped run to become cancelled' }
   )
   const stopped = await new SessionChatTransport(
-    stoppableConnection
+    connection
   ).stopActiveRun()
-  expect(stopped).toEqual({ cancelled: true, runId: stoppedRunId })
+  expect(stopped).toEqual({ cancelled: true, runId })
   await cancelled
 
-  const snapshot = await stoppableConnection.getSession()
-  const stoppedRun = await stoppableConnection.getRun(stoppedRunId)
-  const ids = snapshot.messages.map((message: UIMessage) => message.id)
+  const snapshot = await connection.getSession()
+  const stoppedRun = await connection.getRun(runId)
   expect(stoppedRun?.status).toBe('cancelled')
-  expect(ids).toEqual([
-    stopDelivery.message.id,
-    stoppedRun?.assistantMessageId,
-  ])
+  expect(
+    snapshot.messages.map((message: UIMessage) => message.id)
+  ).toEqual([delivery.message.id, stoppedRun?.assistantMessageId])
   expect(
     snapshot.messages.filter(
       (message: UIMessage) => message.role === 'user'
@@ -177,7 +186,4 @@ test('active streams survive disconnect and explicit stop persists only the cuto
         part.text.length > 0
     )
   ).toBe(true)
-
-  await resumedConnection.dispose()
-  await stoppableConnection.dispose()
-}, 30_000)
+}, 20_000)

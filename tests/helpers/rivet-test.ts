@@ -35,6 +35,7 @@ export async function createRivetTest<A extends Registry<RegistryActors>>(
 ) {
   const registry = createRegistry()
   const clientCleanups: Cleanup[] = []
+  const resourceCleanups: Cleanup[] = []
   const testContext = {
     onTestFinished(cleanup: Cleanup) {
       clientCleanups.push(cleanup)
@@ -44,6 +45,14 @@ export async function createRivetTest<A extends Registry<RegistryActors>>(
   const finishTest = context.onTestFinished ?? onTestFinished
   finishTest(async () => {
     const errors: unknown[] = []
+
+    for (const cleanup of resourceCleanups.reverse()) {
+      try {
+        await cleanup()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
 
     for (const cleanup of clientCleanups) {
       try {
@@ -75,6 +84,9 @@ export async function createRivetTest<A extends Registry<RegistryActors>>(
 
   return {
     client,
+    cleanup(callback: Cleanup) {
+      resourceCleanups.push(callback)
+    },
     actorKey(label: string) {
       const normalizedLabel = label
         .replace(/[^a-zA-Z0-9]+/g, '-')
