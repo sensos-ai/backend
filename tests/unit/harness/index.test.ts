@@ -1,10 +1,11 @@
-import { describe, expect, onTestFinished, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createAgentUIStream, type UIMessage } from 'ai'
 import {
   appendSteeringMessages,
   createHarness,
   type SteeringMessage,
 } from '@/chat/harness'
+import { createTestLanguageModel } from '@/chat/harness/providers/test-model'
 
 describe('createHarness', () => {
   test('accepts and exposes initial messages', () => {
@@ -57,13 +58,6 @@ describe('createHarness', () => {
   })
 
   test('drains active-run steering at the next test-model prepareStep boundary', async () => {
-    const previous = process.env.SENSOS_USE_TEST_MODEL
-    process.env.SENSOS_USE_TEST_MODEL = '1'
-    onTestFinished(() => {
-      if (previous === undefined) delete process.env.SENSOS_USE_TEST_MODEL
-      else process.env.SENSOS_USE_TEST_MODEL = previous
-    })
-
     let prepareSteps = 0
     const steeringMessage: SteeringMessage = {
       message: {
@@ -86,6 +80,7 @@ describe('createHarness', () => {
         files: {},
       } as never,
       signal: new AbortController().signal,
+      languageModel: createTestLanguageModel({ chunkDelayInMs: 0 }),
       initialMessages: [
         {
           id: 'msg_initial',

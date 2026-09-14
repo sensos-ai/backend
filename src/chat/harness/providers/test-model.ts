@@ -28,7 +28,6 @@ const FINAL_REASONING =
   'The simulated tool completed, so I can now produce the final response.'
 const FINAL_TEXT =
   'The test model completed a streamed reasoning, text, and tool-call sequence.'
-const THROW_ON_ABORT_ENV = 'SENSOS_TEST_MODEL_THROW_ON_ABORT'
 
 const usage = {
   inputTokens: {
@@ -147,10 +146,7 @@ export function createTestLanguageModel(
           ? finalStepChunks()
           : firstStepChunks(),
       })
-      if (
-        process.env[THROW_ON_ABORT_ENV] !== '1' ||
-        !options.abortSignal
-      ) {
+      if (!options.abortSignal) {
         return { stream }
       }
 
@@ -160,13 +156,19 @@ export function createTestLanguageModel(
         | ReadableStreamDefaultController<StreamPart>
         | undefined
       const onAbort = () => {
+        if (aborted) return
         aborted = true
         controller?.error(new Error('Test model provider aborted'))
       }
+      if (options.abortSignal.aborted) onAbort()
       return {
         stream: new ReadableStream<StreamPart>({
           start(value) {
             controller = value
+            if (aborted) {
+              value.error(new Error('Test model provider aborted'))
+              return
+            }
             options.abortSignal?.addEventListener('abort', onAbort, {
               once: true,
             })

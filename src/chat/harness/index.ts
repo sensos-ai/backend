@@ -5,6 +5,7 @@ import {
   type GatewayModelId,
   type UIMessage,
 } from 'ai'
+import type { LanguageModelV4 } from '@ai-sdk/provider'
 import {
   providerRegistry,
   loggingMiddleware,
@@ -33,6 +34,8 @@ export interface CreateHarnessOptions {
   features?: HarnessFeatures
   providerOptions?: ProviderOptions
   steeringInput?: HarnessSteeringInput
+  /** Internal dependency seam for deterministic harness tests. */
+  languageModel?: LanguageModelV4
 }
 
 export function createHarness(options: CreateHarnessOptions) {
@@ -45,11 +48,13 @@ export function createHarness(options: CreateHarnessOptions) {
 
   const { testModel, gateway, codex, activeProvider } = providerRegistry()
 
-  const model = features.useMockModel
-    ? testModel
-    : activeProvider === 'codex'
-      ? codex(options.model)
-      : gateway(options.model)
+  const model =
+    options.languageModel ??
+    (features.useMockModel
+      ? testModel
+      : activeProvider === 'codex'
+        ? codex(options.model)
+        : gateway(options.model))
 
   const agent = new ToolLoopAgent({
     model: wrapLanguageModel({ model, middleware: loggingMiddleware }),

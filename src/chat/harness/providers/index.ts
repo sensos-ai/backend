@@ -52,12 +52,6 @@ export function createProviderOptions(opts: ProviderOptions = {}) {
   return newOpts as AIProviderOptions
 }
 
-const mockProvider = customProvider({
-  languageModels: {
-    default: createTestLanguageModel(),
-  },
-})
-
 export const loggingMiddleware: LanguageModelV4Middleware = {
   specificationVersion: 'v4',
   wrapGenerate: async ({ doGenerate, model }) => {
@@ -92,6 +86,11 @@ function codexModelId(modelId?: GatewayModelId): string {
 
 export function providerRegistry(config?: ProviderRegistryConfig) {
   const profile = readProviderProfileSync()
+  const mockProvider = customProvider({
+    languageModels: {
+      default: createTestLanguageModel(),
+    },
+  })
 
   // setup registry with provider credentials
   const registry = createProviderRegistry({

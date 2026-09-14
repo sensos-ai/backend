@@ -68,4 +68,30 @@ describe('test model', () => {
       'The test model completed a streamed reasoning, text, and tool-call sequence.'
     )
   })
+
+  test('always observes cancellation without an environment flag', async () => {
+    const model = createTestLanguageModel({ chunkDelayInMs: 100 })
+    const abort = new AbortController()
+    const result = await model.doStream({
+      prompt: [],
+      abortSignal: abort.signal,
+    } as Parameters<typeof model.doStream>[0])
+    abort.abort()
+    await expect(Array.fromAsync(result.stream)).rejects.toThrow(
+      'Test model provider aborted'
+    )
+  })
+
+  test('observes cancellation before the stream controller is attached', async () => {
+    const model = createTestLanguageModel({ chunkDelayInMs: 0 })
+    const abort = new AbortController()
+    abort.abort()
+    const result = await model.doStream({
+      prompt: [],
+      abortSignal: abort.signal,
+    } as Parameters<typeof model.doStream>[0])
+    await expect(Array.fromAsync(result.stream)).rejects.toThrow(
+      'Test model provider aborted'
+    )
+  })
 })

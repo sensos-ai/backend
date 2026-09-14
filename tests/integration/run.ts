@@ -100,7 +100,6 @@ const env = {
   // unique storage root makes this namespace instance exclusive to this run.
   RIVET_NAMESPACE: 'default',
   SENSOS_USE_TEST_MODEL: '1',
-  SENSOS_TEST_MODEL_THROW_ON_ABORT: '1',
 }
 
 let engine: Bun.Subprocess | undefined
