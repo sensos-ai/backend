@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { SessionDatabase } from './database'
 import { SESSION_META_ID, sessionMeta } from './schema'
 
@@ -36,4 +36,19 @@ export async function getSessionMeta(database: SessionDatabase) {
       title: null,
     }
   )
+}
+
+export async function clearActiveRun(
+  database: SessionDatabase,
+  runId: string
+): Promise<void> {
+  await database
+    .update(sessionMeta)
+    .set({ activeRunId: null })
+    .where(
+      and(
+        eq(sessionMeta.singletonId, SESSION_META_ID),
+        eq(sessionMeta.activeRunId, runId)
+      )
+    )
 }

@@ -71,6 +71,18 @@ shutdown are also cancellation boundaries.
 
 ## Compatibility boundary
 
-This design guarantees stream durability across client detachment while the supervised runtime and Rivet Services sidecar remain healthy. Runtime or machine crash recovery cannot resume an existing provider HTTP response at an exact token boundary and is outside this contract.
+This design guarantees stream durability across client detachment while the supervised runtime and Rivet Services sidecar remain healthy. Runtime or machine crash recovery cannot resume an existing provider HTTP response at an exact token boundary.
+
+Actor wake reconciles persisted ownership before accepting more work. A
+`cancel_requested` run without a live producer becomes `cancelled`; a `running`
+run without a live producer becomes `interrupted`; and its persisted frames are
+projected into the cutoff assistant message. Queued work is left intact so the
+durable workflow can resume it. Stale `activeRunId` pointers to missing or
+terminal runs are cleared.
+
+The same reconciliation runs when a client connects, before session hydration.
+Recovery therefore does not require a user command even when a wedged actor has
+remained awake. It never takes ownership away from a producer that is live in
+the current actor generation.
 
 Runtime activity tracking is intentionally process-local. Keep `SENSOS_RUNTIME_PROTOCOL_VERSION` unchanged when modifying this behavior without changing the CLI-to-runtime request or response schema.

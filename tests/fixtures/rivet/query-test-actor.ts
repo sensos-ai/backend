@@ -1,6 +1,7 @@
 import { actor } from 'rivetkit'
 import type { UIMessage } from 'ai'
 import { sessionDatabase } from '@/runtime/actors/session/db/database'
+import { recoverOrphanedActiveRun } from '@/runtime/actors/session/recovery'
 import {
   deleteSessionData,
   finalizeRun,
@@ -72,6 +73,13 @@ export const queryTestActor = actor({
       }),
     cancel: (context, runId: string) =>
       requestRunCancellation(context.db, runId),
+    recover: async context => {
+      const meta = await getSessionMeta(context.db)
+      return recoverOrphanedActiveRun({
+        database: context.db,
+        activeRunId: meta.activeRunId,
+      })
+    },
     getRun: (context, runId: string) => getRun(context.db, runId),
     setTitle: (context, title: string) =>
       setSessionTitle(context.db, title),

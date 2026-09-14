@@ -14,6 +14,7 @@ import {
   setSessionTitle,
 } from './db'
 import { generateSessionTitle, userMessageText } from './title'
+import { recoverOrphanedActiveRun } from './recovery'
 import { sessionInputSchema } from './types'
 import type {
   CreateState,
@@ -164,6 +165,12 @@ export const onCreate: OnCreate = async (context, _input) => {
 
 export const onWake: OnWake = async context => {
   const catalog = configuredSessionCatalog()
+  const persistedMeta = await getSessionMeta(context.db)
+  await recoverOrphanedActiveRun({
+    database: context.db,
+    activeRunId: persistedMeta.activeRunId,
+    liveRunId: context.vars.activeRun?.runId,
+  })
   const [meta, messages] = await Promise.all([
     getSessionMeta(context.db),
     listMessages(context.db),
@@ -195,7 +202,13 @@ export const onWake: OnWake = async context => {
   scheduleMissingSessionTitle(context)
 }
 
-export const onConnect: OnConnect = context => {
+export const onConnect: OnConnect = async context => {
+  const meta = await getSessionMeta(context.db)
+  await recoverOrphanedActiveRun({
+    database: context.db,
+    activeRunId: meta.activeRunId,
+    liveRunId: context.vars.activeRun?.runId,
+  })
   const catalog = configuredSessionCatalog()
   if (catalog)
     context.waitUntil(catalog.markOpened(context.state.sessionId))

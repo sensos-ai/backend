@@ -2,6 +2,7 @@ export { sessionDatabase } from './database'
 export type { SessionDatabase, SessionDatabaseProvider } from './database'
 export {
   appendRunFrame,
+  clearActiveRun,
   appendMessage,
   appendMessageIfAbsent,
   deleteSessionData,

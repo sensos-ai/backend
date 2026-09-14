@@ -72,6 +72,27 @@ test('persists run state, frames, cancellation, title, and deletion', async () =
     id: 'run_2',
     status: 'cancel_requested',
   })
+  expect(await handle.recover()).toMatchObject({
+    recovered: true,
+    runId: 'run_2',
+    status: 'cancelled',
+  })
+  expect(await handle.getRun('run_2')).toMatchObject({
+    status: 'cancelled',
+    finishedAt: expect.any(Date),
+  })
+  expect(await handle.snapshot('run_2')).toMatchObject({
+    meta: { activeRunId: null },
+    frames: [
+      {
+        seq: 0,
+        chunk: {
+          type: 'abort',
+          reason: 'cancelled during recovery',
+        },
+      },
+    ],
+  })
   expect(await handle.cancel('run_1')).toBeUndefined()
   expect(await handle.getRun('run_1')).toMatchObject({
     status: 'completed',
