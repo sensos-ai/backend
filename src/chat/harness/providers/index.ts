@@ -1,26 +1,36 @@
-import {
-  customProvider,
-  createProviderRegistry,
-  type GatewayModelId,
-} from 'ai'
+import { customProvider, type GatewayModelId } from 'ai'
 import type { ProviderOptions as AIProviderOptions } from '@ai-sdk/provider-utils'
-import type { LanguageModelV4Middleware } from '@ai-sdk/provider'
-import { codex, createOpenaiOptions } from './openai'
-import { aiGateway, createGatewayOptions, DEFAULT_MODEL } from './gateway'
-import { createTestLanguageModel } from './test-model'
+import type {
+  LanguageModelV4,
+  LanguageModelV4Middleware,
+} from '@ai-sdk/provider'
 import { aiEmitter } from '@/shared/events'
-import { readProviderProfileSync } from '@/auth/profile'
-import type { ModelProvider } from '@/auth/profile'
-import type { CodexModelId, ModelRef } from './model'
+import {
+  readProviderProfile,
+  readProviderProfileSync,
+} from '@/auth/profile'
+import { createGatewayOptions, DEFAULT_MODEL } from './gateway'
+import {
+  CODEX_DEFAULT_MODEL,
+  createOpenaiOptions,
+  type CodexModelId,
+} from './openai'
+import {
+  createAiProviderRegistry,
+  createHarnessProviderRegistry,
+  type HarnessProviderRegistry,
+  type ModelProvider,
+  type ProviderDependencies,
+} from './registry'
+import { createTestLanguageModel } from './test-model'
+import { modelRefForProvider, type ModelRef } from './model'
 
 type StrictUnion<T> = T extends any
   ? string extends T
     ? never
     : T
   : never
-
 type StrictGatewayModelId = StrictUnion<GatewayModelId>
-
 type ExtractProvider<
   T extends StrictGatewayModelId = StrictGatewayModelId,
 > = T extends StrictGatewayModelId
@@ -29,13 +39,11 @@ type ExtractProvider<
     : T
   : never
 
-// Example usage:
 export type AnyProvider = ExtractProvider
 export type ProviderExclude<T extends AnyProvider> = Exclude<
   AnyProvider,
   T
 >
-
 export type ProviderOptions = {
   gateway?: Parameters<typeof createGatewayOptions>[0]
   openai?: Parameters<typeof createOpenaiOptions>[1]
@@ -45,14 +53,12 @@ export type ProviderOptions = {
 
 export function createProviderOptions(
   opts: ProviderOptions = {},
-  provider = readProviderProfileSync().activeProvider
+  provider: ModelProvider = readProviderProfileSync().activeProvider
 ) {
-  const isCodex = provider === 'codex'
-
   const newOpts: ProviderOptions = {
     ...opts,
     gateway: createGatewayOptions(opts.gateway),
-    openai: createOpenaiOptions(isCodex, opts.openai),
+    openai: createOpenaiOptions(provider === 'codex', opts.openai),
   }
   return newOpts as AIProviderOptions
 }
@@ -75,63 +81,49 @@ export const loggingMiddleware: LanguageModelV4Middleware = {
   },
 }
 
-type ProviderRegistryConfig = {
-  gateway?: Parameters<typeof aiGateway>[0]
-  codex?: Parameters<typeof codex>[0]
-}
-
-export const CODEX_DEFAULT_MODEL = 'gpt-5.6-sol'
-
 export function defaultModelRef(provider: ModelProvider): ModelRef {
   return provider === 'codex'
-    ? { provider, modelId: CODEX_DEFAULT_MODEL }
-    : { provider, modelId: DEFAULT_MODEL }
+    ? modelRefForProvider('codex', CODEX_DEFAULT_MODEL)
+    : modelRefForProvider('gateway', DEFAULT_MODEL)
 }
 
-function codexModelId(modelId?: CodexModelId): string {
-  if (!modelId) return CODEX_DEFAULT_MODEL
-  return modelId
-}
-
-export function providerRegistry(config?: ProviderRegistryConfig) {
-  const profile = readProviderProfileSync()
-  const mockProvider = customProvider({
-    languageModels: {
-      default: createTestLanguageModel(),
-    },
-  })
-
-  // setup registry with provider credentials
-  const registry = createProviderRegistry({
-    test: mockProvider,
-    gateway: aiGateway(config?.gateway),
-    codex: codex({
-      ...(config?.codex ?? {}),
-      apiKey: profile.codex?.accessToken,
-      accountId: profile.codex?.accountId,
-    }),
-  })
-  const gateway = (modelId: GatewayModelId = DEFAULT_MODEL) =>
-    registry.languageModel(`gateway:${modelId}`)
-  const codexModel = (modelId?: CodexModelId) =>
-    registry.languageModel(`codex:${codexModelId(modelId)}`)
-  const resolveModel = (modelRef?: ModelRef) => {
-    const ref = modelRef ?? defaultModelRef(profile.activeProvider)
-    return {
-      provider: ref.provider,
-      model:
-        ref.provider === 'codex'
-          ? codexModel(ref.modelId)
-          : gateway(ref.modelId),
-    }
+export function resolveModel(
+  providers: HarnessProviderRegistry,
+  ref: ModelRef
+): LanguageModelV4 {
+  switch (ref.provider) {
+    case 'gateway':
+      return providers.gateway.model(ref.modelId)
+    case 'codex':
+      return providers.codex.model(ref.modelId)
   }
+}
 
+export function providerRegistry(dependencies: ProviderDependencies = {}) {
+  const profile = readProviderProfileSync()
+  const harness = createHarnessProviderRegistry(
+    profile.credentials,
+    dependencies
+  )
+  const registry = createAiProviderRegistry(harness)
+  const mockProvider = customProvider({
+    languageModels: { default: createTestLanguageModel() },
+  })
   return {
+    harness,
     registry,
-    testModel: registry.languageModel('test:default'),
-    gateway,
-    codex: codexModel,
-    resolveModel,
+    testModel: mockProvider.languageModel('default'),
+    gateway: (modelId: GatewayModelId = DEFAULT_MODEL) =>
+      harness.gateway.model(modelId),
+    codex: (modelId: CodexModelId = CODEX_DEFAULT_MODEL) =>
+      harness.codex.model(modelId),
+    resolveModel(modelRef?: ModelRef) {
+      const ref = modelRef ?? defaultModelRef(profile.activeProvider)
+      return {
+        provider: ref.provider,
+        model: resolveModel(harness, ref),
+      }
+    },
     activeProvider: profile.activeProvider,
   }
 }
@@ -140,4 +132,41 @@ export function languageModelForRef(modelRef?: ModelRef) {
   return providerRegistry().resolveModel(modelRef)
 }
 
-export type { CodexModelId, ModelRef } from './model'
+export async function listModelsForActiveProvider(
+  dependencies: {
+    readProfile?: typeof readProviderProfile
+    createRegistry?: typeof createHarnessProviderRegistry
+  } = {}
+) {
+  const profile = await (dependencies.readProfile ?? readProviderProfile)()
+  const providers = (
+    dependencies.createRegistry ?? createHarnessProviderRegistry
+  )(profile.credentials)
+  switch (profile.activeProvider) {
+    case 'gateway':
+      return (await providers.gateway.listModels()).map(model => ({
+        ...model,
+        ref: modelRefForProvider('gateway', model.id),
+      }))
+    case 'codex':
+      return (await providers.codex.listModels()).map(model => ({
+        ...model,
+        ref: modelRefForProvider('codex', model.id),
+      }))
+  }
+}
+
+export type { CodexModelId } from './openai'
+export { CODEX_DEFAULT_MODEL } from './openai'
+export type { ModelProvider } from './registry'
+export type { ModelRef } from './model'
+export { modelRefForProvider } from './model'
+export {
+  createAiProviderRegistry,
+  createHarnessProviderRegistry,
+} from './registry'
+export {
+  SensosHarnessProvider,
+  type HarnessAuth,
+  type HarnessModel,
+} from './harness-provider'

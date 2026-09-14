@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import type { GatewayProvider } from '@ai-sdk/gateway'
+import { createGatewayHarnessProvider } from '@/chat/harness/providers/gateway'
 import {
-  createModelCatalogRegistry,
-  gatewayModelCatalog,
+  createHarnessProviderRegistry,
   listModelsForActiveProvider,
-  type ModelCatalog,
-} from '@/chat/harness/providers/model-catalog'
+} from '@/chat/harness/providers'
 import {
   CODEX_MODEL_CLIENT_VERSION,
   CODEX_MODELS_URL,
@@ -15,13 +14,15 @@ import type { ProviderProfile } from '@/auth/profile'
 import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 
 const profile = {
-  version: 1,
+  version: 2,
   activeProvider: 'codex',
-  codex: {
-    accessToken: 'access-token',
-    refreshToken: 'refresh-token',
-    expiresAt: 123,
-    accountId: 'account-id',
+  credentials: {
+    codex: {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: 123,
+      accountId: 'account-id',
+    },
   },
 } as const satisfies ProviderProfile
 
@@ -56,7 +57,11 @@ describe('provider model catalogs', () => {
       }),
     } as unknown as GatewayProvider
 
-    expect(await gatewayModelCatalog(gateway).listModels()).toEqual([
+    expect(
+      await createGatewayHarnessProvider(undefined, {
+        provider: gateway,
+      }).listModels()
+    ).toEqual([
       { id: 'anthropic/claude', name: 'anthropic/claude' },
       { id: 'openai/gpt', name: 'openai/gpt' },
       { id: 'moonshotai/kimi', name: 'moonshotai/kimi' },
@@ -67,7 +72,7 @@ describe('provider model catalogs', () => {
   test('fetches visible API models with Codex authentication', async () => {
     let request: Request | undefined
     const models = await getCodexModels(
-      profile.codex,
+      profile.credentials.codex,
       async (input, init) => {
         request = new Request(input, init)
         return Response.json({
@@ -136,23 +141,32 @@ describe('provider model catalogs', () => {
   })
 
   test('routes discovery through the active provider catalog', async () => {
-    const gateway: ModelCatalog = {
-      listModels: async () => [{ id: 'gateway-model', name: 'Gateway' }],
-    }
-    const codex: ModelCatalog = {
-      listModels: async () => [{ id: 'codex-model', name: 'Codex' }],
-    }
-
     expect(
       await listModelsForActiveProvider({
         readProfile: async () => profile,
-        createRegistry: current =>
-          createModelCatalogRegistry(current, { gateway, codex }),
+        createRegistry: credentials =>
+          createHarnessProviderRegistry(credentials, {
+            codex: {
+              fetch: async () =>
+                Response.json({
+                  models: [
+                    {
+                      slug: 'codex-model',
+                      display_name: 'Codex',
+                      visibility: 'list',
+                      supported_in_api: true,
+                      priority: 1,
+                    },
+                  ],
+                }),
+            },
+          }),
       })
     ).toEqual([
       {
         id: 'codex-model',
         name: 'Codex',
+        priority: 1,
         ref: { provider: 'codex', modelId: 'codex-model' },
       },
     ])

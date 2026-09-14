@@ -3,8 +3,31 @@ import {
   type OpenAIResponsesProviderOptions,
 } from '@ai-sdk/openai'
 import { z } from 'zod'
-import type { CodexCredential } from '@/auth/profile'
-import type { AvailableModel } from '../model-catalog'
+import { loginWithCodex } from '@/auth/oauth/codex'
+import {
+  SensosHarnessProvider,
+  type HarnessModel,
+} from '../harness-provider'
+
+export type CodexModelId = `gpt-${string}` | (string & {})
+
+export type CodexCredential = {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+  accountId: string
+}
+
+export interface CodexCatalogModel extends HarnessModel<CodexModelId> {
+  priority: number
+}
+
+export type CodexLoginOptions = {
+  openUrl: (url: string) => Promise<void>
+  signal?: AbortSignal
+}
+
+export const CODEX_DEFAULT_MODEL: CodexModelId = 'gpt-5.6-sol'
 
 export type ModelCatalogFetch = (
   input: string | URL | Request,
@@ -24,7 +47,7 @@ const codexModelsResponseSchema = z.object({
       description: z.string().nullish(),
       visibility: z.string().optional(),
       supported_in_api: z.boolean().optional(),
-      priority: z.number().optional(),
+      priority: z.number(),
     })
   ),
 })
@@ -32,7 +55,7 @@ const codexModelsResponseSchema = z.object({
 export async function getCodexModels(
   credential: CodexCredential,
   fetchImpl: ModelCatalogFetch = fetch
-): Promise<AvailableModel[]> {
+): Promise<CodexCatalogModel[]> {
   const response = await fetchImpl(CODEX_MODELS_URL, {
     headers: {
       Authorization: `Bearer ${credential.accessToken}`,
@@ -61,9 +84,7 @@ export async function getCodexModels(
       id: model.slug,
       name: model.display_name,
       ...(model.description ? { description: model.description } : {}),
-      ...(model.priority !== undefined
-        ? { priority: model.priority }
-        : {}),
+      priority: model.priority,
     }))
 }
 
@@ -95,6 +116,39 @@ export const codex = (config?: OpenaiCreateOptions) =>
       'OpenAI-Beta': 'responses=experimental',
     },
   })
+
+export function createCodexHarnessProvider(
+  credential?: CodexCredential,
+  dependencies: {
+    fetch?: ModelCatalogFetch
+    config?: OpenaiCreateOptions
+  } = {}
+) {
+  const provider = codex({
+    ...dependencies.config,
+    apiKey: credential?.accessToken ?? dependencies.config?.apiKey,
+    accountId: credential?.accountId ?? dependencies.config?.accountId,
+  })
+  return new SensosHarnessProvider({
+    sensosId: 'codex',
+    provider,
+    defaultModelId: CODEX_DEFAULT_MODEL,
+    async listModels() {
+      if (!credential) {
+        throw new Error(
+          'Codex is not connected. Run `sensos login codex` first.'
+        )
+      }
+      return getCodexModels(credential, dependencies.fetch)
+    },
+    auth: {
+      login: (options: CodexLoginOptions) =>
+        loginWithCodex(options.openUrl, options.signal),
+      token: value => Promise.resolve(value.accessToken),
+      user: value => Promise.resolve({ accountId: value.accountId }),
+    },
+  })
+}
 
 export const openai = (config?: OpenaiCreateOptions) =>
   createOpenAI({

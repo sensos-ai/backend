@@ -5,7 +5,7 @@ import type {
   UIMessage,
   UIMessageChunk,
 } from 'ai'
-import type { ModelProvider } from '@/auth/profile'
+import type { ModelProvider } from '@/chat/harness/providers'
 import type { ModelRef } from '@/chat/harness/providers/model'
 import {
   index,

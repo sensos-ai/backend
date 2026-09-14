@@ -9,29 +9,20 @@ import {
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { productConfigDir } from '@/config/paths'
-
-export type ModelProvider = 'gateway' | 'codex'
-
-export type VercelCredential = {
-  accessToken: string
-  refreshToken?: string
-  expiresAt: number
-  teamId?: string
-}
-
-export type CodexCredential = {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number
-  accountId: string
-}
+import type {
+  ModelProvider,
+  ProviderCredentials,
+} from '@/chat/harness/providers/registry'
+import type { VercelCredential } from '@/chat/harness/providers/gateway'
+import type { CodexCredential } from '@/chat/harness/providers/openai'
 
 export type ProviderProfile = {
-  version: 1
+  version: 2
   activeProvider: ModelProvider
-  vercel?: VercelCredential
-  codex?: CodexCredential
+  credentials: ProviderCredentials
 }
+
+export type { CodexCredential, ModelProvider, VercelCredential }
 
 export function providerProfilePath(
   directory = productConfigDir()
@@ -40,16 +31,40 @@ export function providerProfilePath(
 }
 
 function parseProviderProfile(value: unknown): ProviderProfile {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Sensos credentials are invalid. Run `sensos login`.')
+  }
+  const candidate = value as {
+    version?: unknown
+    activeProvider?: unknown
+    credentials?: ProviderCredentials
+    vercel?: VercelCredential
+    codex?: CodexCredential
+  }
   if (
-    !value ||
-    typeof value !== 'object' ||
-    (value as Partial<ProviderProfile>).version !== 1 ||
-    ((value as Partial<ProviderProfile>).activeProvider !== 'gateway' &&
-      (value as Partial<ProviderProfile>).activeProvider !== 'codex')
+    candidate.activeProvider !== 'gateway' &&
+    candidate.activeProvider !== 'codex'
   ) {
     throw new Error('Sensos credentials are invalid. Run `sensos login`.')
   }
-  return value as ProviderProfile
+  if (candidate.version === 2) {
+    return {
+      version: 2,
+      activeProvider: candidate.activeProvider,
+      credentials: candidate.credentials ?? {},
+    }
+  }
+  if (candidate.version === 1) {
+    return {
+      version: 2,
+      activeProvider: candidate.activeProvider,
+      credentials: {
+        ...(candidate.vercel ? { gateway: candidate.vercel } : {}),
+        ...(candidate.codex ? { codex: candidate.codex } : {}),
+      },
+    }
+  }
+  throw new Error('Sensos credentials are invalid. Run `sensos login`.')
 }
 
 export async function readProviderProfile(
@@ -61,7 +76,7 @@ export async function readProviderProfile(
     )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { version: 1, activeProvider: 'gateway' }
+      return { version: 2, activeProvider: 'gateway', credentials: {} }
     }
     throw error
   }
@@ -76,7 +91,7 @@ export function readProviderProfileSync(
     )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { version: 1, activeProvider: 'gateway' }
+      return { version: 2, activeProvider: 'gateway', credentials: {} }
     }
     throw error
   }
@@ -108,23 +123,18 @@ export async function updateProviderProfile(
 }
 
 export async function clearProviderCredential(
-  provider: 'vercel' | 'codex',
+  provider: ModelProvider,
   directory = productConfigDir()
 ): Promise<void> {
   const profile = await readProviderProfile(directory)
   const next: ProviderProfile = {
     ...profile,
-    ...(provider === 'vercel'
-      ? { vercel: undefined }
-      : { codex: undefined }),
+    credentials: { ...profile.credentials, [provider]: undefined },
   }
-  if (
-    (provider === 'vercel' && profile.activeProvider === 'gateway') ||
-    (provider === 'codex' && profile.activeProvider === 'codex')
-  ) {
-    next.activeProvider = provider === 'vercel' ? 'codex' : 'gateway'
+  if (provider === profile.activeProvider) {
+    next.activeProvider = provider === 'gateway' ? 'codex' : 'gateway'
   }
-  if (!next.vercel && !next.codex) {
+  if (!next.credentials.gateway && !next.credentials.codex) {
     try {
       await unlink(providerProfilePath(directory))
     } catch (error) {

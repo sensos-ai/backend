@@ -1,12 +1,15 @@
 import type { GatewayModelId } from 'ai'
 import { z } from 'zod'
-import type { ModelProvider } from '@/auth/profile'
+import type { ModelIdOf } from './harness-provider'
+import type { HarnessProviderRegistry, ModelProvider } from './registry'
+import type { CodexModelId } from './openai'
 
-export type CodexModelId = `gpt-${string}` | (string & {})
-
-export type ModelRef =
-  | { provider: 'gateway'; modelId: GatewayModelId }
-  | { provider: 'codex'; modelId: CodexModelId }
+export type ModelRef = {
+  [ProviderId in ModelProvider]: {
+    provider: ProviderId
+    modelId: ModelIdOf<HarnessProviderRegistry[ProviderId]>
+  }
+}[ModelProvider]
 
 export const modelRefSchema = z.discriminatedUnion('provider', [
   z.object({
@@ -23,11 +26,14 @@ export const modelRefSchema = z.discriminatedUnion('provider', [
   }),
 ])
 
-export function modelRefForProvider(
-  provider: ModelProvider,
-  modelId: string
-): ModelRef {
-  return modelRefSchema.parse({ provider, modelId })
+export function modelRefForProvider<ProviderId extends ModelProvider>(
+  provider: ProviderId,
+  modelId: ModelIdOf<HarnessProviderRegistry[ProviderId]>
+): Extract<ModelRef, { provider: ProviderId }> {
+  return modelRefSchema.parse({ provider, modelId }) as Extract<
+    ModelRef,
+    { provider: ProviderId }
+  >
 }
 
 export function normalizeLegacyModelRef(
@@ -35,8 +41,7 @@ export function normalizeLegacyModelRef(
 ): ModelRef | undefined {
   if (!value) return undefined
   if (typeof value !== 'string') return modelRefSchema.parse(value)
-  return modelRefForProvider(
-    value.includes('/') ? 'gateway' : 'codex',
-    value
-  )
+  return value.includes('/')
+    ? modelRefForProvider('gateway', value as GatewayModelId)
+    : modelRefForProvider('codex', value as CodexModelId)
 }

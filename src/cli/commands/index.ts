@@ -19,26 +19,21 @@ import {
 } from '@/storage/session-catalog'
 import { HELP_TEXT } from './help'
 import { commandArguments } from '@/config/models'
-import { listModelsForActiveProvider } from '@/chat/harness/providers/model-catalog'
 import {
+  createHarnessProviderRegistry,
+  defaultModelRef,
+  listModelsForActiveProvider,
   modelRefForProvider,
   type ModelRef,
-} from '@/chat/harness/providers/model'
-import { defaultModelRef } from '@/chat/harness/providers'
+  type ModelProvider,
+} from '@/chat/harness/providers'
 import { removeProductData, uninstallSensos } from './maintenance'
 import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
   clearProviderCredential,
   readProviderProfile,
   updateProviderProfile,
-  type ModelProvider,
 } from '@/auth/profile'
-import { loginWithCodex } from '@/auth/oauth/codex'
-import {
-  beginVercelLogin,
-  completeVercelLogin,
-  listVercelTeams,
-} from '@/auth/oauth/vercel'
 import {
   acquireRuntime,
   RUNTIME_ENDPOINT,
@@ -100,48 +95,46 @@ async function login(provider: 'vercel' | 'codex'): Promise<void> {
   const cancel = () => controller.abort()
   process.once('SIGINT', cancel)
   try {
+    const profile = await readProviderProfile()
+    const providers = createHarnessProviderRegistry(profile.credentials)
     if (provider === 'codex') {
       console.log('Opening OpenAI Codex sign-in in your browser.')
-      const credential = await loginWithCodex(
-        openBrowser,
-        controller.signal
-      )
+      const credential = await providers.codex.auth.login({
+        openUrl: openBrowser,
+        signal: controller.signal,
+      })
       await updateProviderProfile(profile => ({
         ...profile,
         activeProvider: 'codex',
-        codex: credential,
+        credentials: { ...profile.credentials, codex: credential },
       }))
       console.log('Connected to OpenAI Codex.')
       return
     }
 
-    const device = await beginVercelLogin(controller.signal)
-    console.log(
-      `Open this URL and enter code ${device.user_code}:\n${device.verification_uri_complete}`
-    )
-    try {
-      await openBrowser(device.verification_uri_complete)
-    } catch {
-      console.error('Could not open a browser. Use the URL above.')
-    }
-    const credential = await completeVercelLogin(device, controller.signal)
-    const teams = await listVercelTeams(
-      credential.accessToken,
-      controller.signal
-    )
-    if (teams.length === 0) {
-      throw new Error(
-        'No Vercel teams are available. Sensos requires a team-scoped AI Gateway account.'
-      )
-    }
-    const teamId = await select({
-      message: 'Choose the Vercel scope for AI Gateway',
-      choices: teams.map(team => ({ name: team.name, value: team.id })),
+    const credential = await providers.gateway.auth.login({
+      openUrl: async url => {
+        console.log(`Open this URL to connect Vercel AI Gateway:\n${url}`)
+        try {
+          await openBrowser(url)
+        } catch {
+          console.error('Could not open a browser. Use the URL above.')
+        }
+      },
+      selectTeam: teams =>
+        select({
+          message: 'Choose the Vercel scope for AI Gateway',
+          choices: teams.map(team => ({
+            name: team.name,
+            value: team.id,
+          })),
+        }),
+      signal: controller.signal,
     })
     await updateProviderProfile(profile => ({
       ...profile,
       activeProvider: 'gateway',
-      vercel: { ...credential, teamId },
+      credentials: { ...profile.credentials, gateway: credential },
     }))
     console.log('Connected to Vercel AI Gateway.')
   } finally {
@@ -153,12 +146,12 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
   const profile = await readProviderProfile()
   if (
     provider === 'gateway' &&
-    !profile.vercel &&
+    !profile.credentials.gateway &&
     !process.env.AI_GATEWAY_API_KEY
   ) {
     throw new Error('Gateway is not connected. Run `sensos login` first.')
   }
-  if (provider === 'codex' && !profile.codex) {
+  if (provider === 'codex' && !profile.credentials.codex) {
     throw new Error(
       'Codex is not connected. Run `sensos login codex` first.'
     )
@@ -168,6 +161,20 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
     activeProvider: provider,
   }))
   console.log(`Active provider: ${provider}`)
+}
+
+async function logout(provider: 'vercel' | 'codex'): Promise<void> {
+  const providerId = provider === 'vercel' ? 'gateway' : 'codex'
+  const profile = await readProviderProfile()
+  const harness = createHarnessProviderRegistry(profile.credentials)
+  if (providerId === 'gateway') {
+    const credential = profile.credentials.gateway
+    if (credential) await harness.gateway.auth.logout?.(credential)
+  } else {
+    const credential = profile.credentials.codex
+    if (credential) await harness.codex.auth.logout?.(credential)
+  }
+  await clearProviderCredential(providerId)
 }
 
 async function runChatSession(
@@ -572,7 +579,7 @@ async function main(): Promise<void> {
     if (provider !== 'vercel' && provider !== 'codex') {
       throw new Error('Usage: sensos logout [vercel|codex]')
     }
-    await clearProviderCredential(provider)
+    await logout(provider)
     console.log(`Signed out of ${provider}.`)
     return
   }

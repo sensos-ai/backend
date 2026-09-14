@@ -15,7 +15,7 @@ import {
   languageModelForRef,
   loggingMiddleware,
 } from '@/chat/harness/providers'
-import type { ModelProvider } from '@/auth/profile'
+import type { ModelProvider } from '@/chat/harness/providers'
 import { readProviderProfileSync } from '@/auth/profile'
 import type { ModelRef } from '@/chat/harness/providers/model'
 
