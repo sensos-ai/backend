@@ -1,10 +1,7 @@
-import '../../setup'
 import { expect, onTestFinished, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
-import { setup } from 'rivetkit'
-import { setupTest } from 'rivetkit/test'
 import { SessionChatTransport } from '@/chat/transport'
-import { sessionAgent } from '@/runtime/actors/session'
+import { createRivetTestClient } from '../../fixtures/rivet/client'
 import type {
   DeliveryRoutedEvent,
   FrameEvent,
@@ -58,19 +55,8 @@ async function collect(stream: ReadableStream<UIMessageChunk>) {
 }
 
 test('active streams survive disconnect and explicit stop persists only the cutoff', async () => {
-  const previousTestModel = process.env.SENSOS_USE_TEST_MODEL
-  process.env.SENSOS_USE_TEST_MODEL = '1'
-  onTestFinished(() => {
-    if (previousTestModel === undefined) {
-      delete process.env.SENSOS_USE_TEST_MODEL
-    } else {
-      process.env.SENSOS_USE_TEST_MODEL = previousTestModel
-    }
-  })
-
-  const registry = setup({ use: { session: sessionAgent } })
-  const { client } = await setupTest({ onTestFinished } as never, registry)
-  onTestFinished(() => registry.shutdown())
+  const client = createRivetTestClient()
+  onTestFinished(() => client.dispose())
 
   const resumableHandle = client.session.getOrCreate([createTestId()], {
     createWithInput: { cwd: process.cwd() },

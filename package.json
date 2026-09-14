@@ -13,7 +13,7 @@
     "build": "bun run scripts/build-sensos.ts",
     "test": "bun run test:unit && bun run test:integration && bun run test:e2e",
     "test:unit": "bun test --no-orphans --path-ignore-patterns='**/*.integration.test.ts' --path-ignore-patterns='tests/e2e/**'",
-    "test:integration": "RIVETKIT_STORAGE_PATH=/tmp/sensos-suite-$$ bun test --no-orphans integration",
+    "test:integration": "bun run scripts/test-integration.ts",
     "test:e2e": "RIVETKIT_STORAGE_PATH=/tmp/sensos-suite-$$ bun test --no-orphans --pass-with-no-tests tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",

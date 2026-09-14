@@ -1,10 +1,7 @@
-import '../../setup'
 import { expect, onTestFinished, test } from 'bun:test'
 import type { UIMessage } from 'ai'
-import { setup } from 'rivetkit'
-import { setupTest } from 'rivetkit/test'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
-import { sessionAgent } from '@/runtime/actors/session'
+import { createRivetTestClient } from '../../fixtures/rivet/client'
 import type {
   DeliveryRoutedEvent,
   FrameEvent,
@@ -63,26 +60,8 @@ async function waitForCompletedRun(
 }
 
 test('completable run queue durably creates and deduplicates a run', async () => {
-  const previousTestModel = process.env.SENSOS_USE_TEST_MODEL
-  const previousThrowOnAbort = process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT
-  process.env.SENSOS_USE_TEST_MODEL = '1'
-  process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT = '1'
-  onTestFinished(() => {
-    if (previousTestModel === undefined) {
-      delete process.env.SENSOS_USE_TEST_MODEL
-    } else {
-      process.env.SENSOS_USE_TEST_MODEL = previousTestModel
-    }
-    if (previousThrowOnAbort === undefined) {
-      delete process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT
-    } else {
-      process.env.SENSOS_TEST_MODEL_THROW_ON_ABORT = previousThrowOnAbort
-    }
-  })
-
-  const registry = setup({ use: { session: sessionAgent } })
-  const { client } = await setupTest({ onTestFinished } as never, registry)
-  onTestFinished(() => registry.shutdown())
+  const client = createRivetTestClient()
+  onTestFinished(() => client.dispose())
   const handle = client.session.getOrCreate([createTestId()], {
     createWithInput: { cwd: process.cwd() },
     params: { clientId: createTestId() },
