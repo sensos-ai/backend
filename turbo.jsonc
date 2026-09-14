@@ -1,0 +1,31 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "cacheDir": ".turbo/cache",
+  "cacheMaxAge": "30d",
+  "cacheMaxSize": "20GB",
+  "globalEnv": ["DATABASE_URL"],
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/.env"],
+      "outputs": ["dist/**"]
+    },
+    "test:unit": {},
+    "test:integration": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/.env"]
+    },
+    "test:e2e:run": {
+      "dependsOn": ["build"]
+    },
+    "clean": {
+      "cache": false
+    },
+    "lint": {
+      "cache": false
+    },
+    "lint:check": {},
+    "format": {
+      "cache": false
+    },
+    "typecheck": {}
+  }
+}

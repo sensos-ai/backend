@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.4.0",
   "bin": {
     "sensos": "./dist/sensos",
     "sensos-dev": "./src/cli/bootstrap.ts"
@@ -14,7 +15,8 @@
     "test": "bun run test:unit && bun run test:integration && bun run test:e2e",
     "test:unit": "bun test --no-orphans --parallel tests/unit",
     "test:integration": "bun run tests/integration/run.ts",
-    "test:e2e": "bun run build && bun test --no-orphans tests/e2e",
+    "test:e2e": "bun run build && bun run test:e2e:run",
+    "test:e2e:run": "bun test --no-orphans tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "db:generate": "bun run scripts/db/generate.ts",
@@ -22,6 +24,11 @@
     "lint": "biome check --write",
     "lint:check": "biome check",
     "format": "biome format --write",
+    "turbo:build": "turbo run build",
+    "turbo:lint": "turbo run lint:check",
+    "turbo:typecheck": "turbo run typecheck",
+    "turbo:test": "turbo run test:unit test:integration test:e2e:run",
+    "turbo:check": "turbo run lint:check typecheck test:unit test:integration test:e2e:run",
     "global:link": "bun run build && bun link",
     "global:unlink": "bun unlink",
     "clean": "git clean -xdf node_modules dist \"*.tsbuildinfo\""
@@ -46,6 +53,7 @@
     "@types/bun": "^1.4.0",
     "@types/node": "^26.1.1",
     "drizzle-kit": "0.31.8",
+    "turbo": "^2.10.13",
     "typescript": "^7.0.2"
   },
   "trustedDependencies": [

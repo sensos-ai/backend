@@ -86,3 +86,10 @@ remained awake. It never takes ownership away from a producer that is live in
 the current actor generation.
 
 Runtime activity tracking is intentionally process-local. Keep `SENSOS_RUNTIME_PROTOCOL_VERSION` unchanged when modifying this behavior without changing the CLI-to-runtime request or response schema.
+
+## Verification
+
+Use `bun run turbo:build` before exercising the compiled CLI. Run the narrowest
+relevant test during development, then `bun run turbo:check` before handing off
+a cross-layer runtime change. The Turbo graph builds `dist/sensos` before its
+E2E test leaf.

@@ -81,15 +81,19 @@ bun test --no-orphans path/to/test.ts
 bun run test:unit
 bun run test:integration
 bun run test:e2e
-bun run typecheck
-bun run lint:check
+bun run turbo:test
+bun run turbo:typecheck
+bun run turbo:lint
+bun run turbo:check
 git diff --check
 ```
 
 `test:e2e` builds the executable. Run `bun run build` explicitly before manual
-checks of `dist/sensos`. Run the complete deterministic sequence before handing
-off a phase or a cross-layer change; use `test:stress` when concurrency,
-ordering, cancellation, or lifecycle behavior changed.
+checks of `dist/sensos`, or use the cached `bun run turbo:build`. The Turbo test
+task runs unit, integration, and E2E suites concurrently while building before
+the E2E leaf. Run `bun run turbo:check` before handing off a phase or a
+cross-layer change; use `test:stress` when concurrency, ordering, cancellation,
+or lifecycle behavior changed.
 
 Keep CI simple during rapid pre-launch development: it should exercise the
 same deterministic commands, reject empty required suites, and retain useful
