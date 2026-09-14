@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test'
-import { getCodexUser } from '@/auth/oauth/codex'
-import { getVercelUser } from '@/auth/oauth/vercel'
+import { getCodexUser, refreshCodexCredential } from '@/auth/oauth/codex'
+import {
+  getVercelUser,
+  refreshVercelCredential,
+} from '@/auth/oauth/vercel'
 
 test('normalizes the Vercel user and selected team', async () => {
   const requests: string[] = []
@@ -73,4 +76,70 @@ test('normalizes the Codex user and default organization', async () => {
     email: 'grace@example.com',
     affiliation: { kind: 'organization', name: 'Compiler Labs' },
   })
+})
+
+test('refreshes and rotates a Vercel credential', async () => {
+  const requests: Request[] = []
+  const credential = await refreshVercelCredential(
+    {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: 0,
+    },
+    async (input, init) => {
+      const request = new Request(input, init)
+      requests.push(request)
+      if (request.url.endsWith('/.well-known/openid-configuration')) {
+        return Response.json({
+          device_authorization_endpoint: 'https://vercel.test/device',
+          token_endpoint: 'https://vercel.test/token',
+        })
+      }
+      return Response.json({
+        access_token: 'new-access',
+        refresh_token: 'new-refresh',
+        expires_in: 3600,
+      })
+    }
+  )
+
+  expect(requests).toHaveLength(2)
+  const refreshBody = await requests[1]?.text()
+  expect(refreshBody).toContain('grant_type=refresh_token')
+  expect(refreshBody).toContain('refresh_token=old-refresh')
+  expect(credential.accessToken).toBe('new-access')
+  expect(credential.refreshToken).toBe('new-refresh')
+  expect(credential.expiresAt).toBeGreaterThan(Date.now())
+})
+
+test('refreshes and rotates a Codex credential', async () => {
+  const payload = Buffer.from(
+    JSON.stringify({
+      'https://api.openai.com/auth': {
+        chatgpt_account_id: 'account-new',
+      },
+    })
+  ).toString('base64url')
+  let request: Request | undefined
+  const credential = await refreshCodexCredential(
+    {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: 0,
+      accountId: 'account-old',
+    },
+    async (input, init) => {
+      request = new Request(input, init)
+      return Response.json({
+        access_token: `header.${payload}.signature`,
+        refresh_token: 'new-refresh',
+        expires_in: 3600,
+      })
+    }
+  )
+
+  expect(await request?.text()).toContain('refresh_token=old-refresh')
+  expect(credential.refreshToken).toBe('new-refresh')
+  expect(credential.accountId).toBe('account-new')
+  expect(credential.expiresAt).toBeGreaterThan(Date.now())
 })

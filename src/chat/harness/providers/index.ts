@@ -6,7 +6,8 @@ import type {
 } from '@ai-sdk/provider'
 import { aiEmitter } from '@/shared/events'
 import {
-  readProviderProfile,
+  readFreshProviderProfile,
+  type readProviderProfile,
   readProviderProfileSync,
 } from '@/auth/profile'
 import { createGatewayOptions, DEFAULT_MODEL } from './gateway'
@@ -99,8 +100,15 @@ export function resolveModel(
   }
 }
 
-export function providerRegistry(dependencies: ProviderDependencies = {}) {
-  const profile = readProviderProfileSync()
+export async function providerRegistry(
+  dependencies: ProviderDependencies = {},
+  provider?: ModelProvider
+) {
+  const profile = await readFreshProviderProfile(
+    provider,
+    undefined,
+    dependencies
+  )
   const harness = createHarnessProviderRegistry(
     profile.credentials,
     dependencies
@@ -128,8 +136,10 @@ export function providerRegistry(dependencies: ProviderDependencies = {}) {
   }
 }
 
-export function languageModelForRef(modelRef?: ModelRef) {
-  return providerRegistry().resolveModel(modelRef)
+export async function languageModelForRef(modelRef?: ModelRef) {
+  return (await providerRegistry({}, modelRef?.provider)).resolveModel(
+    modelRef
+  )
 }
 
 export async function listModelsForActiveProvider(
@@ -138,7 +148,9 @@ export async function listModelsForActiveProvider(
     createRegistry?: typeof createHarnessProviderRegistry
   } = {}
 ) {
-  const profile = await (dependencies.readProfile ?? readProviderProfile)()
+  const profile = dependencies.readProfile
+    ? await dependencies.readProfile()
+    : await readFreshProviderProfile()
   const providers = (
     dependencies.createRegistry ?? createHarnessProviderRegistry
   )(profile.credentials)

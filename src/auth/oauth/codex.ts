@@ -73,6 +73,44 @@ export async function getCodexUser(
   }
 }
 
+export async function refreshCodexCredential(
+  credential: CodexOAuthCredential,
+  fetchImpl: CodexAuthFetch = fetch
+): Promise<CodexOAuthCredential> {
+  const response = await fetchImpl(`${AUTH_BASE_URL}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: process.env.SENSOS_CODEX_CLIENT_ID ?? CLIENT_ID,
+      refresh_token: credential.refreshToken,
+    }),
+  })
+  const token = (await response.json()) as {
+    access_token?: unknown
+    refresh_token?: unknown
+    expires_in?: unknown
+  }
+  if (
+    !response.ok ||
+    typeof token.access_token !== 'string' ||
+    typeof token.expires_in !== 'number'
+  ) {
+    throw new Error(
+      'OpenAI Codex login expired. Run `sensos login codex` again.'
+    )
+  }
+  return {
+    accessToken: token.access_token,
+    refreshToken:
+      typeof token.refresh_token === 'string'
+        ? token.refresh_token
+        : credential.refreshToken,
+    expiresAt: Date.now() + token.expires_in * 1000,
+    accountId: accountId(token.access_token),
+  }
+}
+
 function accountId(accessToken: string): string {
   const payload = accessToken.split('.')[1]
   if (!payload)

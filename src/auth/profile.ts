@@ -1,8 +1,10 @@
 import {
   chmod,
   mkdir,
+  open,
   readFile,
   rename,
+  stat,
   unlink,
   writeFile,
 } from 'node:fs/promises'
@@ -11,8 +13,10 @@ import { join } from 'node:path'
 import { productConfigDir } from '@/config/paths'
 import type {
   ModelProvider,
+  ProviderDependencies,
   ProviderCredentials,
 } from '@/chat/harness/providers/registry'
+import { createHarnessProviderRegistry } from '@/chat/harness/providers/registry'
 import type { VercelCredential } from '@/chat/harness/providers/gateway'
 import type { CodexCredential } from '@/chat/harness/providers/openai'
 
@@ -120,6 +124,110 @@ export async function updateProviderProfile(
   const profile = update(await readProviderProfile(directory))
   await writeProviderProfile(profile, directory)
   return profile
+}
+
+const REFRESH_SKEW_MS = 60_000
+const LOCK_STALE_MS = 30_000
+const LOCK_WAIT_MS = 5_000
+
+async function withProviderProfileLock<T>(
+  operation: () => Promise<T>,
+  directory: string
+): Promise<T> {
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const lockPath = `${providerProfilePath(directory)}.lock`
+  const deadline = Date.now() + LOCK_WAIT_MS
+  while (true) {
+    try {
+      const lock = await open(lockPath, 'wx', 0o600)
+      try {
+        return await operation()
+      } finally {
+        await lock.close()
+        await unlink(lockPath).catch(() => undefined)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      let age: number
+      try {
+        age = Date.now() - (await stat(lockPath)).mtimeMs
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === 'ENOENT')
+          continue
+        throw statError
+      }
+      if (age > LOCK_STALE_MS) {
+        await unlink(lockPath).catch(() => undefined)
+        continue
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          'Timed out waiting to refresh provider credentials.'
+        )
+      }
+      await Bun.sleep(50)
+    }
+  }
+}
+
+export async function readFreshProviderProfile(
+  provider?: ModelProvider,
+  directory = productConfigDir(),
+  dependencies: ProviderDependencies = {}
+): Promise<ProviderProfile> {
+  const initial = await readProviderProfile(directory)
+  const providerId = provider ?? initial.activeProvider
+  const credential = initial.credentials[providerId]
+  if (!credential || credential.expiresAt > Date.now() + REFRESH_SKEW_MS) {
+    return initial
+  }
+
+  return withProviderProfileLock(async () => {
+    const current = await readProviderProfile(directory)
+    if (providerId === 'gateway') {
+      const currentCredential = current.credentials.gateway
+      if (
+        !currentCredential ||
+        currentCredential.expiresAt > Date.now() + REFRESH_SKEW_MS
+      ) {
+        return current
+      }
+      const harness = createHarnessProviderRegistry(
+        current.credentials,
+        dependencies
+      )
+      const refresh = harness.gateway.auth.refresh
+      if (!refresh) return current
+      const refreshed = await refresh(currentCredential)
+      const next = {
+        ...current,
+        credentials: { ...current.credentials, gateway: refreshed },
+      }
+      await writeProviderProfile(next, directory)
+      return next
+    }
+
+    const currentCredential = current.credentials.codex
+    if (
+      !currentCredential ||
+      currentCredential.expiresAt > Date.now() + REFRESH_SKEW_MS
+    ) {
+      return current
+    }
+    const harness = createHarnessProviderRegistry(
+      current.credentials,
+      dependencies
+    )
+    const refresh = harness.codex.auth.refresh
+    if (!refresh) return current
+    const refreshed = await refresh(currentCredential)
+    const next = {
+      ...current,
+      credentials: { ...current.credentials, codex: refreshed },
+    }
+    await writeProviderProfile(next, directory)
+    return next
+  }, directory)
 }
 
 export async function clearProviderCredential(

@@ -117,7 +117,7 @@ export async function generateSessionTitle(
 
   const activeProvider =
     options.provider ?? readProviderProfileSync().activeProvider
-  const resolved = languageModelForRef(titleModelRef(activeProvider))
+  const resolved = await languageModelForRef(titleModelRef(activeProvider))
   const model = wrapLanguageModel({
     model: resolved.model,
     middleware: loggingMiddleware,

@@ -56,9 +56,10 @@ function userAgent() {
 }
 
 async function authorizationServer(
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fetchImpl: OAuthFetch = fetch
 ): Promise<AuthorizationServer> {
-  const response = await fetch(
+  const response = await fetchImpl(
     new URL('.well-known/openid-configuration', ISSUER),
     {
       headers: { 'user-agent': userAgent() },
@@ -211,6 +212,45 @@ export async function completeVercelLogin(
     )
   }
   throw new Error('Vercel login expired. Run `sensos login` again.')
+}
+
+export async function refreshVercelCredential(
+  credential: VercelOAuthCredential,
+  fetchImpl: OAuthFetch = fetch
+): Promise<VercelOAuthCredential> {
+  if (!credential.refreshToken) {
+    throw new Error(
+      'Vercel login expired. Run `sensos login vercel` again.'
+    )
+  }
+  const server = await authorizationServer(undefined, fetchImpl)
+  const response = await fetchImpl(server.token_endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'user-agent': userAgent(),
+    },
+    body: new URLSearchParams({
+      client_id: process.env.SENSOS_VERCEL_CLIENT_ID ?? CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: credential.refreshToken,
+    }),
+  })
+  const value = (await response.json()) as Partial<TokenResponse>
+  if (
+    !response.ok ||
+    typeof value.access_token !== 'string' ||
+    typeof value.expires_in !== 'number'
+  ) {
+    throw new Error(
+      'Vercel login expired. Run `sensos login vercel` again.'
+    )
+  }
+  return {
+    accessToken: value.access_token,
+    refreshToken: value.refresh_token ?? credential.refreshToken,
+    expiresAt: Date.now() + value.expires_in * 1000,
+  }
 }
 
 export async function listVercelTeams(

@@ -230,7 +230,7 @@ export async function executeRun(
           outcome: UIMessageStreamOutcome
           finishReason?: FinishReason
         } = { outcome: { status: 'unknown' } }
-        const harness = createHarness({
+        const harness = await createHarness({
           sandbox,
           signal: abortController.signal,
           initialMessages: messages,

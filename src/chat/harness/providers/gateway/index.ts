@@ -17,6 +17,7 @@ import {
   completeVercelLogin,
   getVercelUser,
   listVercelTeams,
+  refreshVercelCredential,
 } from '@/auth/oauth/vercel'
 
 export const DEFAULT_MODEL: GatewayModelId = 'openai/gpt-5.6-terra'
@@ -142,6 +143,10 @@ export function createGatewayHarnessProvider(
         return { ...oauthCredential, teamId }
       },
       token: value => Promise.resolve(value.accessToken),
+      refresh: async value => ({
+        ...(await refreshVercelCredential(value, dependencies.fetch)),
+        ...(value.teamId ? { teamId: value.teamId } : {}),
+      }),
       user: value => getVercelUser(value, dependencies.fetch),
     },
   })

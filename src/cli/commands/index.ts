@@ -36,6 +36,7 @@ import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
   clearProviderCredential,
   readProviderProfile,
+  readFreshProviderProfile,
   updateProviderProfile,
 } from '@/auth/profile'
 import {
@@ -187,7 +188,8 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
 }
 
 async function providerInfo(): Promise<void> {
-  const profile = await readProviderProfile()
+  const initial = await readProviderProfile()
+  const profile = await readFreshProviderProfile(initial.activeProvider)
   const providers = createHarnessProviderRegistry(profile.credentials)
   let user: HarnessUser
   switch (profile.activeProvider) {

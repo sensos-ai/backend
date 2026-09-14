@@ -12,6 +12,7 @@ import {
   type ProviderOptions,
   type ModelRef,
 } from './providers'
+import { readProviderProfileSync } from '@/auth/profile'
 import { DEFAULT_AGENT_INSTRUCTIONS } from './constants'
 import { resolveHarnessFeatures, type HarnessFeatures } from './features'
 import type { Sandbox } from './sandbox'
@@ -38,7 +39,7 @@ export interface CreateHarnessOptions {
   languageModel?: LanguageModelV4
 }
 
-export function createHarness(options: CreateHarnessOptions) {
+export async function createHarness(options: CreateHarnessOptions) {
   const features = resolveHarnessFeatures(options.features)
   const tools = {
     ...sandboxTools,
@@ -46,11 +47,18 @@ export function createHarness(options: CreateHarnessOptions) {
 
   const toolsContext = { sandbox: options.sandbox }
 
-  const providers = providerRegistry()
-  const resolved = providers.resolveModel(options.model)
+  const providers = options.languageModel
+    ? undefined
+    : await providerRegistry({}, options.model?.provider)
+  const resolved = providers?.resolveModel(options.model)
+  const resolvedProvider =
+    options.model?.provider ??
+    resolved?.provider ??
+    readProviderProfileSync().activeProvider
   const model =
     options.languageModel ??
-    (features.useMockModel ? providers.testModel : resolved.model)
+    (features.useMockModel ? providers?.testModel : resolved?.model)
+  if (!model) throw new Error('Could not resolve a language model.')
 
   const agent = new ToolLoopAgent({
     model: wrapLanguageModel({ model, middleware: loggingMiddleware }),
@@ -64,7 +72,7 @@ export function createHarness(options: CreateHarnessOptions) {
     },
     providerOptions: createProviderOptions(
       options.providerOptions,
-      options.model?.provider ?? resolved?.provider
+      resolvedProvider
     ),
     prepareStep: options.steeringInput
       ? async ({ messages }) => ({
@@ -89,4 +97,4 @@ export function createHarness(options: CreateHarnessOptions) {
 export * from './features'
 export * from './steering'
 
-export type Harness = ReturnType<typeof createHarness>
+export type Harness = Awaited<ReturnType<typeof createHarness>>

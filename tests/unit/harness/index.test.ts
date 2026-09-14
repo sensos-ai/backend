@@ -8,7 +8,7 @@ import {
 import { createTestLanguageModel } from '@/chat/harness/providers/test-model'
 
 describe('createHarness', () => {
-  test('accepts and exposes initial messages', () => {
+  test('accepts and exposes initial messages', async () => {
     const initialMessages: UIMessage[] = [
       {
         id: 'msg_initial',
@@ -17,40 +17,43 @@ describe('createHarness', () => {
       },
     ]
 
-    const harness = createHarness({
+    const harness = await createHarness({
       sandbox: {
         id: 'sandbox_test',
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
       model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
+      languageModel: createTestLanguageModel(),
       initialMessages,
     })
 
     expect(harness.initialMessages).toEqual(initialMessages)
   })
 
-  test('defaults initial messages to an empty transcript', () => {
-    const harness = createHarness({
+  test('defaults initial messages to an empty transcript', async () => {
+    const harness = await createHarness({
       sandbox: {
         id: 'sandbox_test',
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
       model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
+      languageModel: createTestLanguageModel(),
     })
 
     expect(harness.initialMessages).toEqual([])
   })
 
-  test('exposes resolved feature flags to harness consumers', () => {
-    const harness = createHarness({
+  test('exposes resolved feature flags to harness consumers', async () => {
+    const harness = await createHarness({
       sandbox: {
         id: 'sandbox_test',
         cwd: '/workspace',
       } as never,
       signal: new AbortController().signal,
       model: { provider: 'gateway', modelId: 'openai/gpt-5.6-sol' },
+      languageModel: createTestLanguageModel(),
       features: { useMockModel: false },
     })
 
@@ -67,7 +70,7 @@ describe('createHarness', () => {
       },
       origin: { type: 'session', sessionId: 'session_peer' },
     }
-    const harness = createHarness({
+    const harness = await createHarness({
       sandbox: {
         id: 'sandbox_test',
         provider: 'agentos',

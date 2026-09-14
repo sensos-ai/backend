@@ -30,6 +30,7 @@ export interface HarnessAuth<
     credential: Credential,
     options?: { revoke?: boolean }
   ): Promise<void>
+  refresh?(credential: Credential): Promise<Credential>
   user?(credential: Credential): Promise<User>
   token?(credential: Credential): Promise<string>
 }
