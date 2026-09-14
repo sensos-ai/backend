@@ -220,6 +220,8 @@ export class TerminalRenderer {
   #onResize?: () => void
   #resolveStreamInterrupt?: () => void
   #streamSubmissionPending = false
+  #detachStream = false
+  #switchSessionRequested = false
   #commands: readonly SlashCommand[] = []
   #connectionStatus?: string
   #connectionSpinnerTimer?: ReturnType<typeof setInterval>
@@ -398,6 +400,8 @@ export class TerminalRenderer {
     this.#interrupted = false
     this.#totalTokens = undefined
     this.#assistantOutputTokens = undefined
+    this.#detachStream = false
+    this.#switchSessionRequested = false
     this.#assistantOutputTokensPerSecond = undefined
     const displayModes = {
       tools: options?.tools ?? this.#tools,
@@ -408,11 +412,11 @@ export class TerminalRenderer {
     this.#paint()
     const streamInterrupted = new Promise<void>(resolve => {
       this.#resolveStreamInterrupt = () => {
-        result.detach?.()
         resolve()
       }
     })
-    this.#onData = chunk => this.#handleStreamingKey(chunk, options)
+    this.#onData = chunk =>
+      this.#handleStreamingKey(chunk, options, result)
     this.#attachInput()
     let responseMessage: UIMessage | undefined
     const stream = toReadableStream(
@@ -445,7 +449,11 @@ export class TerminalRenderer {
       }
     } finally {
       this.#resolveStreamInterrupt = undefined
-      if (this.#interrupted && !options?.detachOnInterrupt) {
+      if (
+        this.#interrupted &&
+        !this.#detachStream &&
+        !options?.detachOnInterrupt
+      ) {
         result.abort?.()
       }
       this.#detachInput()
@@ -463,6 +471,11 @@ export class TerminalRenderer {
     }
 
     if (this.#interrupted) {
+      if (this.#switchSessionRequested) {
+        const error = new Error('Switch session requested')
+        error.name = 'SwitchSessionError'
+        throw error
+      }
       throw interruptedError()
     }
 
@@ -590,7 +603,11 @@ export class TerminalRenderer {
     }
   }
 
-  #handleStreamingKey(chunk: Buffer, options?: TerminalSessionOptions) {
+  #handleStreamingKey(
+    chunk: Buffer,
+    options: TerminalSessionOptions | undefined,
+    result: AgentTUIStreamResult
+  ) {
     const key = parseKey(chunk)
 
     switch (key.type) {
@@ -631,7 +648,10 @@ export class TerminalRenderer {
           this.#paint()
           break
         }
-        if (input.type === 'exit') {
+        if (input.type === 'exit' || input.type === 'switch-session') {
+          this.#detachStream = true
+          this.#switchSessionRequested = input.type === 'switch-session'
+          result.detach?.()
           this.#interrupted = true
           this.#resolveStreamInterrupt?.()
           break

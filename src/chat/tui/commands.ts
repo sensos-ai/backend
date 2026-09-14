@@ -3,6 +3,7 @@ export type DeliveryPriority = 'now' | 'next' | 'adaptive'
 export type SlashCommandResult =
   | 'continue'
   | 'exit'
+  | 'switch-session'
   | { prompt: string; priority: DeliveryPriority }
   | undefined
 
@@ -44,11 +45,14 @@ export function slashCommandArgument(input: string): string | undefined {
 export type StreamingInput =
   | { type: 'delivery'; prompt: string; priority: DeliveryPriority }
   | { type: 'exit' }
+  | { type: 'switch-session' }
   | { type: 'stop' }
 
 export function parseStreamingInput(input: string): StreamingInput {
   const trimmed = input.trim()
-  if (/^\/exit$/i.test(trimmed)) return { type: 'exit' }
+  if (/^\/switch-session$/i.test(trimmed)) {
+    return { type: 'switch-session' }
+  }
   if (/^\/stop$/i.test(trimmed)) return { type: 'stop' }
 
   const command = trimmed.match(/^\/(interrupt|queue)(?:\s+([\s\S]+))?$/i)

@@ -161,7 +161,7 @@ export class AgentTUIRunner {
     this.hydrationUpdates = options.hydrationUpdates
   }
 
-  async run() {
+  async run(): Promise<'exit' | 'switch-session'> {
     let title = this.title
     const messages: UIMessage[] = [...this.initialMessages]
     const initialMessageIds = new Set(messages.map(message => message.id))
@@ -250,7 +250,7 @@ export class AgentTUIRunner {
           if (prompt == null) {
             if (!this.renderer.readPrompt) {
               if (hasRunTurn) {
-                return
+                return 'exit'
               }
 
               throw new Error(
@@ -265,14 +265,14 @@ export class AgentTUIRunner {
               })
             } catch (error) {
               if (isInterruptedError(error)) {
-                return
+                return 'exit'
               }
 
               throw error
             }
 
             if (prompt == null) {
-              return
+              return 'exit'
             }
 
             const command = findSlashCommand(prompt, this.commands)
@@ -286,7 +286,9 @@ export class AgentTUIRunner {
                 rendererSuspended = false
                 if (pendingHydration) applyHydration(pendingHydration)
               }
-              if (result === 'exit') return
+              if (result === 'exit' || result === 'switch-session') {
+                return result
+              }
               if (result && typeof result === 'object') {
                 prompt = result.prompt
                 deliveryPriority = result.priority
@@ -324,7 +326,6 @@ export class AgentTUIRunner {
               responseStatistics: this.responseStatistics,
               contextSize: this.contextSize,
               waitForExit: false,
-              detachOnInterrupt: Boolean(this.transport),
               onStopDuringStream: this.transport
                 ? async () => {
                     const transport = this
@@ -417,7 +418,15 @@ export class AgentTUIRunner {
           }
         } catch (error) {
           if (isInterruptedError(error)) {
-            return
+            streamWithoutPrompt = false
+            prompt = undefined
+            continue
+          }
+          if (
+            error instanceof Error &&
+            error.name === 'SwitchSessionError'
+          ) {
+            return 'switch-session'
           }
 
           throw error

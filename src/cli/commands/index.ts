@@ -164,17 +164,16 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
   console.log(`Active provider: ${provider}`)
 }
 
-async function runChat(
+async function runChatSession(
   options: ChatOptions,
   catalog: SessionCatalog,
-  root: string
-): Promise<void> {
-  let runtime: RuntimeLease | undefined
+  runtime: RuntimeLease
+): Promise<'exit' | 'switch-session'> {
   let connection: SessionConnection | undefined
-  let chatExited = false
   let sessionDeleted = false
   let activeSessionId: string | undefined
   let connectionReady: Promise<SessionConnection> | undefined
+  let outcome: 'exit' | 'switch-session' = 'exit'
   let closing = false
   try {
     let sessionId = options.sessionId
@@ -185,12 +184,11 @@ async function runChat(
       )
       if (sessions.length === 0) {
         console.log('No saved sessions.')
-        return
+        return 'exit'
       }
-      runtime = acquireRuntime(root)
       sessionId = await pickLocalSession(sessions)
       if (!sessionId) {
-        return
+        return 'exit'
       }
     }
     if (!sessionId) throw new Error('Session id is required')
@@ -213,7 +211,6 @@ async function runChat(
       responseStatistics: 'outputTokensPerSecond',
     })
 
-    runtime ??= acquireRuntime(root)
     let selectedModel = options.model
     const ready = (async () => {
       await runtime?.ready
@@ -243,7 +240,7 @@ async function runChat(
       .catch(() => undefined)
 
     const chatTransport = new DeferredSessionChatTransport(connectionReady)
-    await new AgentTUIRunner({
+    outcome = await new AgentTUIRunner({
       renderer,
       title: `sensos · ${catalogSession.title ?? sessionId}`,
       chatId: sessionId,
@@ -374,24 +371,50 @@ async function runChat(
           },
         },
         {
-          name: '/exit',
-          description: 'Close this chat',
-          run: () => 'exit',
+          name: '/switch-session',
+          description: 'Switch to another session',
+          run: () => 'switch-session',
         },
       ],
     }).run()
-    chatExited = true
+    return outcome
   } finally {
     closing = true
     if (connection) {
       await Promise.race([connection.dispose(), Bun.sleep(2_000)])
     }
-    await runtime?.release()
-    if (chatExited && activeSessionId && !sessionDeleted) {
+    if (
+      outcome !== 'switch-session' &&
+      activeSessionId &&
+      !sessionDeleted
+    ) {
       console.log(
         `\x1b[90mResume this session with:\nsensos --resume ${activeSessionId}\x1b[0m`
       )
     }
+  }
+}
+
+async function runChat(
+  options: ChatOptions,
+  catalog: SessionCatalog,
+  root: string
+): Promise<void> {
+  const runtime = acquireRuntime(root)
+  let nextOptions = options
+  try {
+    while (true) {
+      const outcome = await runChatSession(nextOptions, catalog, runtime)
+      if (outcome !== 'switch-session') return
+      nextOptions = {
+        ...options,
+        sessionId: undefined,
+        pickSession: true,
+        createSession: false,
+      }
+    }
+  } finally {
+    await runtime.release()
   }
 }
 
