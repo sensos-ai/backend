@@ -7,8 +7,8 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   isCompatibleRuntime,
   resolveRuntimeIdleTtl,
-} from '../../src/runtime'
-import { computeRuntimeSourceIdentity } from '../../src/runtime/build-identity'
+} from '../../../src/runtime'
+import { computeRuntimeSourceIdentity } from '../../../src/runtime/build-identity'
 
 describe('runtime idle TTL', () => {
   test('uses an intentional bounded configuration', () => {

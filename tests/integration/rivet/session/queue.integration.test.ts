@@ -11,8 +11,8 @@ import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import {
   createRivetTest,
   createTestRegistry,
-} from '../../helpers/rivet-test'
-import { waitForEvent, waitForValue } from '../../helpers/wait'
+} from '../../../helpers/rivet-test'
+import { waitForEvent, waitForValue } from '../../../helpers/wait'
 
 const createTestId = createIdGeneratorWithPrefix('queue_test')
 
@@ -52,10 +52,10 @@ async function waitForCompletedRun(
 }
 
 test('run submission persists once and deduplicates retries', async () => {
-  const { client, actorKey } = await createSessionTest(
+  const { client, actorKey, trackedActorKey } = await createSessionTest(
     'run submission deduplication'
   )
-  const handle = client.session.getOrCreate([actorKey('session')], {
+  const handle = client.session.getOrCreate([trackedActorKey('session')], {
     createWithInput: { cwd: process.cwd() },
     params: { clientId: actorKey('client') },
   })
@@ -107,11 +107,10 @@ test('run submission persists once and deduplicates retries', async () => {
 }, 20_000)
 
 test('now delivery interrupts the active run and starts a successor', async () => {
-  const { client, actorKey, cleanup } = await createSessionTest(
-    'now actor delivery'
-  )
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('now actor delivery')
   const connection = client.session
-    .getOrCreate([actorKey('session')], {
+    .getOrCreate([trackedActorKey('session')], {
       createWithInput: { cwd: process.cwd() },
     })
     .connect({ clientId: actorKey('client') })
@@ -187,11 +186,10 @@ test('now delivery interrupts the active run and starts a successor', async () =
 }, 20_000)
 
 test('adaptive delivery steers the active run without replacing it', async () => {
-  const { client, actorKey, cleanup } = await createSessionTest(
-    'adaptive actor delivery'
-  )
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('adaptive actor delivery')
   const connection = client.session
-    .getOrCreate([actorKey('session')], {
+    .getOrCreate([trackedActorKey('session')], {
       createWithInput: { cwd: process.cwd() },
     })
     .connect({ clientId: actorKey('client') })
@@ -231,11 +229,10 @@ test('adaptive delivery steers the active run without replacing it', async () =>
 }, 20_000)
 
 test('next delivery waits for the active run before starting once', async () => {
-  const { client, actorKey, cleanup } = await createSessionTest(
-    'next actor delivery'
-  )
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('next actor delivery')
   const connection = client.session
-    .getOrCreate([actorKey('session')], {
+    .getOrCreate([trackedActorKey('session')], {
       createWithInput: { cwd: process.cwd() },
     })
     .connect({ clientId: actorKey('client') })

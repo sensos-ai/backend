@@ -12,8 +12,8 @@ import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import {
   createRivetTest,
   createTestRegistry,
-} from '../../helpers/rivet-test'
-import { waitForEvent, waitForValue } from '../../helpers/wait'
+} from '../../../helpers/rivet-test'
+import { waitForEvent, waitForValue } from '../../../helpers/wait'
 
 const createTestId = createIdGeneratorWithPrefix('stream_control')
 
@@ -48,10 +48,9 @@ async function createSessionTest(name: string) {
 }
 
 test('actor stream advances while disconnected and replays on reconnect', async () => {
-  const { client, actorKey, cleanup } = await createSessionTest(
-    'stream disconnect recovery'
-  )
-  const handle = client.session.getOrCreate([actorKey('session')], {
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('stream disconnect recovery')
+  const handle = client.session.getOrCreate([trackedActorKey('session')], {
     createWithInput: { cwd: process.cwd() },
   })
   const firstConnection = handle.connect({ clientId: actorKey('client') })
@@ -131,11 +130,10 @@ test('actor stream advances while disconnected and replays on reconnect', async 
 }, 20_000)
 
 test('transport stop cancels the active actor run and persists its cutoff', async () => {
-  const { client, actorKey, cleanup } = await createSessionTest(
-    'transport stop behavior'
-  )
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('transport stop behavior')
   const connection = client.session
-    .getOrCreate([actorKey('session')], {
+    .getOrCreate([trackedActorKey('session')], {
       createWithInput: { cwd: process.cwd() },
     })
     .connect({ clientId: actorKey('client') })
