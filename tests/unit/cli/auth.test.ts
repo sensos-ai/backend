@@ -37,11 +37,13 @@ describe('provider profile', () => {
         activeProvider: 'codex',
         credentials: {
           gateway: {
+            kind: 'oauth',
             accessToken: 'gateway-token',
             expiresAt: 123,
             teamId: 'team_test',
           },
           codex: {
+            kind: 'oauth',
             accessToken: 'codex-token',
             refreshToken: 'refresh-token',
             expiresAt: 456,
@@ -63,6 +65,7 @@ describe('provider profile', () => {
           activeProvider: 'gateway',
           credentials: {
             gateway: {
+              kind: 'oauth',
               accessToken: 'vercel-token',
               refreshToken: 'refresh-token',
               expiresAt: 123,

@@ -20,6 +20,12 @@ import { createHarnessProviderRegistry } from '@/chat/harness/providers/registry
 import type { VercelCredential } from '@/chat/harness/providers/gateway'
 import type { CodexCredential } from '@/chat/harness/providers/openai'
 
+type LegacyVercelCredential = Omit<
+  Extract<VercelCredential, { kind: 'oauth' }>,
+  'kind'
+>
+type LegacyCodexCredential = Omit<CodexCredential, 'kind'>
+
 export type ProviderProfile = {
   version: 2
   activeProvider: ModelProvider
@@ -41,9 +47,12 @@ function parseProviderProfile(value: unknown): ProviderProfile {
   const candidate = value as {
     version?: unknown
     activeProvider?: unknown
-    credentials?: ProviderCredentials
-    vercel?: VercelCredential
-    codex?: CodexCredential
+    credentials?: {
+      gateway?: VercelCredential | LegacyVercelCredential
+      codex?: CodexCredential | LegacyCodexCredential
+    }
+    vercel?: LegacyVercelCredential
+    codex?: LegacyCodexCredential
   }
   if (
     candidate.activeProvider !== 'gateway' &&
@@ -52,10 +61,29 @@ function parseProviderProfile(value: unknown): ProviderProfile {
     throw new Error('Sensos credentials are invalid. Run `sensos login`.')
   }
   if (candidate.version === 2) {
+    const gateway = candidate.credentials?.gateway
+    const codex = candidate.credentials?.codex
     return {
       version: 2,
       activeProvider: candidate.activeProvider,
-      credentials: candidate.credentials ?? {},
+      credentials: {
+        ...(gateway
+          ? {
+              gateway:
+                'kind' in gateway
+                  ? gateway
+                  : { ...gateway, kind: 'oauth' as const },
+            }
+          : {}),
+        ...(codex
+          ? {
+              codex:
+                'kind' in codex
+                  ? codex
+                  : { ...codex, kind: 'oauth' as const },
+            }
+          : {}),
+      },
     }
   }
   if (candidate.version === 1) {
@@ -63,8 +91,12 @@ function parseProviderProfile(value: unknown): ProviderProfile {
       version: 2,
       activeProvider: candidate.activeProvider,
       credentials: {
-        ...(candidate.vercel ? { gateway: candidate.vercel } : {}),
-        ...(candidate.codex ? { codex: candidate.codex } : {}),
+        ...(candidate.vercel
+          ? { gateway: { ...candidate.vercel, kind: 'oauth' as const } }
+          : {}),
+        ...(candidate.codex
+          ? { codex: { ...candidate.codex, kind: 'oauth' as const } }
+          : {}),
       },
     }
   }
@@ -126,7 +158,6 @@ export async function updateProviderProfile(
   return profile
 }
 
-const REFRESH_SKEW_MS = 60_000
 const LOCK_STALE_MS = 30_000
 const LOCK_WAIT_MS = 5_000
 
@@ -178,24 +209,29 @@ export async function readFreshProviderProfile(
   const initial = await readProviderProfile(directory)
   const providerId = provider ?? initial.activeProvider
   const credential = initial.credentials[providerId]
-  if (!credential || credential.expiresAt > Date.now() + REFRESH_SKEW_MS) {
+  const initialHarness = createHarnessProviderRegistry(
+    initial.credentials,
+    dependencies
+  )
+  const initialAuth = initialHarness[providerId].auth
+  if (!credential || !initialAuth.needsRefresh(credential as never)) {
     return initial
   }
 
   return withProviderProfileLock(async () => {
     const current = await readProviderProfile(directory)
+    const harness = createHarnessProviderRegistry(
+      current.credentials,
+      dependencies
+    )
     if (providerId === 'gateway') {
       const currentCredential = current.credentials.gateway
       if (
         !currentCredential ||
-        currentCredential.expiresAt > Date.now() + REFRESH_SKEW_MS
+        !harness.gateway.auth.needsRefresh(currentCredential)
       ) {
         return current
       }
-      const harness = createHarnessProviderRegistry(
-        current.credentials,
-        dependencies
-      )
       const refresh = harness.gateway.auth.refresh
       if (!refresh) return current
       const refreshed = await refresh(currentCredential)
@@ -210,14 +246,10 @@ export async function readFreshProviderProfile(
     const currentCredential = current.credentials.codex
     if (
       !currentCredential ||
-      currentCredential.expiresAt > Date.now() + REFRESH_SKEW_MS
+      !harness.codex.auth.needsRefresh(currentCredential)
     ) {
       return current
     }
-    const harness = createHarnessProviderRegistry(
-      current.credentials,
-      dependencies
-    )
     const refresh = harness.codex.auth.refresh
     if (!refresh) return current
     const refreshed = await refresh(currentCredential)

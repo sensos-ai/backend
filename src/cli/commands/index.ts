@@ -100,10 +100,18 @@ async function login(
     const profile = await readProviderProfile()
     const providers = createHarnessProviderRegistry(profile.credentials)
     const provider = createHarnessAuthRegistry(providers)[authKey]
-    const credential = await provider.auth.login({
-      device,
-      signal: controller.signal,
-    })
+    const credential =
+      provider.authKey === 'codex'
+        ? await provider.auth.login({
+            strategy: {
+              type: device ? 'oauth-device' : 'oauth-pkce',
+            },
+            signal: controller.signal,
+          })
+        : await provider.auth.login({
+            strategy: { type: 'oauth-device' },
+            signal: controller.signal,
+          })
     await updateProviderProfile(profile => ({
       ...profile,
       activeProvider: provider.sensosId,

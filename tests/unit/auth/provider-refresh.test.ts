@@ -27,6 +27,7 @@ test('refreshes once under a lock and persists the rotated credential', async ()
       activeProvider: 'codex',
       credentials: {
         codex: {
+          kind: 'oauth',
           accessToken: 'old-access',
           refreshToken: 'old-refresh',
           expiresAt: 0,
@@ -82,6 +83,7 @@ test('does not refresh a credential outside the expiry window', async () => {
       activeProvider: 'gateway',
       credentials: {
         gateway: {
+          kind: 'oauth',
           accessToken: 'access',
           refreshToken: 'refresh',
           expiresAt: Date.now() + 120_000,
@@ -102,6 +104,9 @@ test('does not refresh a credential outside the expiry window', async () => {
     },
   })
 
-  expect(profile.credentials.gateway?.accessToken).toBe('access')
+  expect(profile.credentials.gateway).toMatchObject({
+    kind: 'oauth',
+    accessToken: 'access',
+  })
   expect(requests).toBe(0)
 })

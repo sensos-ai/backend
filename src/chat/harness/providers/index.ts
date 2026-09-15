@@ -178,11 +178,22 @@ export {
   createHarnessAuthRegistry,
   createHarnessProviderRegistry,
   harnessAuthKeys,
+  harnessAuthMetadata,
 } from './registry'
-export type { HarnessAuthKey } from './registry'
+export type {
+  HarnessAuthKey,
+  HarnessAuthMetadata,
+  HarnessAuthStrategies,
+} from './registry'
 export {
   SensosHarnessProvider,
+  type ApiKeyAuthStrategy,
+  type AuthStrategy,
+  type AuthStrategyName,
+  type DeviceAuthStrategy,
   type HarnessAuth,
+  type HarnessLoginOptions,
   type HarnessModel,
   type HarnessUser,
+  type PKCEAuthStrategy,
 } from './harness-provider'

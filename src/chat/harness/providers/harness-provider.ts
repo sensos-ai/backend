@@ -16,26 +16,51 @@ export interface HarnessUser {
   }
 }
 
-export type HarnessLoginOptions = {
-  device?: boolean
-  signal?: AbortSignal
+export type AuthStrategyName = 'oauth-device' | 'oauth-pkce' | 'apiKey'
+
+export type PKCEAuthStrategy = { type: 'oauth-pkce' }
+export type DeviceAuthStrategy = { type: 'oauth-device' }
+export type ApiKeyAuthStrategy = { type: 'apiKey'; apiKey?: string }
+export type AuthStrategy =
+  | PKCEAuthStrategy
+  | DeviceAuthStrategy
+  | ApiKeyAuthStrategy
+
+export type HarnessLoginOptions<
+  Strategy extends AuthStrategy = AuthStrategy,
+> = {
+  strategy: Strategy
+  signal: AbortSignal
 }
 
+export type OAuthCredential = { kind: 'oauth'; expiresAt: number }
+
+type StrategyFor<Names extends readonly AuthStrategyName[]> = Extract<
+  AuthStrategy,
+  { type: Names[number] }
+>
 export type OptionalArgument<T> = [T] extends [undefined]
   ? []
   : [options: T]
 
 export interface HarnessAuth<
   Credential,
-  LoginOptions = undefined,
+  Strategies extends readonly AuthStrategyName[],
   User = unknown,
 > {
-  login(...args: OptionalArgument<LoginOptions>): Promise<Credential>
+  login(
+    options: HarnessLoginOptions<StrategyFor<Strategies>>
+  ): Promise<Credential>
+  needsRefresh(
+    credential: Credential
+  ): credential is Extract<Credential, OAuthCredential>
   logout?(
     credential: Credential,
     options?: { revoke?: boolean }
   ): Promise<void>
-  refresh?(credential: Credential): Promise<Credential>
+  refresh?(
+    credential: Extract<Credential, OAuthCredential>
+  ): Promise<Extract<Credential, OAuthCredential>>
   user?(credential: Credential): Promise<User>
   token?(credential: Credential): Promise<string>
 }
@@ -47,18 +72,22 @@ export interface HarnessProviderOptions<
   ModelId extends string,
   Model extends HarnessModel<ModelId>,
   Credential,
+  Strategies extends readonly [AuthStrategyName, ...AuthStrategyName[]],
   ListOptions = undefined,
-  LoginOptions = undefined,
   User = unknown,
 > {
   sensosId: Id
   authKey: AuthKey
+  displayName: string
+  supportedAuthStrategies: Strategies
+  defaultAuthStrategy: Strategies[number]
+  apiKeyEnvironmentVariable?: string
   provider: Provider
   defaultModelId: ModelId
   listModels(
     ...args: OptionalArgument<ListOptions>
   ): Promise<readonly Model[]>
-  auth: HarnessAuth<Credential, LoginOptions, User>
+  auth: HarnessAuth<Credential, Strategies, User>
 }
 
 export class SensosHarnessProvider<
@@ -68,15 +97,27 @@ export class SensosHarnessProvider<
   ModelId extends string,
   Model extends HarnessModel<ModelId>,
   Credential,
+  const Strategies extends readonly [
+    AuthStrategyName,
+    ...AuthStrategyName[],
+  ],
   ListOptions = undefined,
-  LoginOptions = undefined,
   User = unknown,
 > {
+  declare readonly _types: {
+    modelId: ModelId
+    credential: Credential
+    strategies: Strategies
+  }
   readonly sensosId: Id
   readonly authKey: AuthKey
+  readonly displayName: string
+  readonly supportedAuthStrategies: Strategies
+  readonly defaultAuthStrategy: Strategies[number]
+  readonly apiKeyEnvironmentVariable?: string
   readonly provider: Provider
   readonly defaultModelId: ModelId
-  readonly auth: HarnessAuth<Credential, LoginOptions, User>
+  readonly auth: HarnessAuth<Credential, Strategies, User>
   private readonly fetchModels: (
     ...args: OptionalArgument<ListOptions>
   ) => Promise<readonly Model[]>
@@ -89,17 +130,37 @@ export class SensosHarnessProvider<
       ModelId,
       Model,
       Credential,
+      Strategies,
       ListOptions,
-      LoginOptions,
       User
     >
   ) {
     this.sensosId = options.sensosId
     this.authKey = options.authKey
+    this.displayName = options.displayName
+    this.supportedAuthStrategies = options.supportedAuthStrategies
+    this.defaultAuthStrategy = options.defaultAuthStrategy
+    this.apiKeyEnvironmentVariable = options.apiKeyEnvironmentVariable
     this.provider = options.provider
     this.defaultModelId = options.defaultModelId
     this.auth = options.auth
     this.fetchModels = options.listModels
+    const strategies = new Set(options.supportedAuthStrategies)
+    if (strategies.size !== options.supportedAuthStrategies.length) {
+      throw new Error(
+        `${options.displayName} declares duplicate auth strategies.`
+      )
+    }
+    if (!strategies.has(options.defaultAuthStrategy)) {
+      throw new Error(
+        `${options.displayName} default auth strategy is unsupported.`
+      )
+    }
+    if (strategies.has('apiKey') && !options.apiKeyEnvironmentVariable) {
+      throw new Error(
+        `${options.displayName} must declare an API-key environment variable.`
+      )
+    }
   }
 
   model(modelId: ModelId = this.defaultModelId): LanguageModelV4 {
@@ -113,47 +174,26 @@ export class SensosHarnessProvider<
   }
 }
 
-export type ModelIdOf<Provider> =
-  Provider extends SensosHarnessProvider<
-    string,
-    string,
-    ProviderV4,
-    infer ModelId,
-    HarnessModel<any>,
-    unknown,
-    unknown,
-    unknown,
-    unknown
-  >
-    ? ModelId
-    : never
+export type ModelIdOf<Provider> = Provider extends {
+  readonly _types: { modelId: infer ModelId }
+}
+  ? ModelId
+  : never
 
-export type CredentialOf<Provider> =
-  Provider extends SensosHarnessProvider<
-    string,
-    string,
-    ProviderV4,
-    string,
-    HarnessModel<string>,
-    infer Credential,
-    unknown,
-    unknown,
-    unknown
-  >
-    ? Credential
-    : never
+export type CredentialOf<Provider> = Provider extends {
+  readonly _types: { credential: infer Credential }
+}
+  ? Credential
+  : never
 
-export type AuthKeyOf<Provider> =
-  Provider extends SensosHarnessProvider<
-    string,
-    infer AuthKey,
-    ProviderV4,
-    string,
-    HarnessModel<string>,
-    unknown,
-    unknown,
-    unknown,
-    unknown
-  >
-    ? AuthKey
-    : never
+export type AuthKeyOf<Provider> = Provider extends {
+  readonly authKey: infer AuthKey extends string
+}
+  ? AuthKey
+  : never
+
+export type AuthStrategiesOf<Provider> = Provider extends {
+  readonly _types: { strategies: infer Strategies }
+}
+  ? Strategies
+  : never

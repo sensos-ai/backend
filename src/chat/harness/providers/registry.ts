@@ -5,7 +5,11 @@ import {
   type VercelCredential,
 } from './gateway'
 import { createCodexHarnessProvider, type CodexCredential } from './openai'
-import type { AuthKeyOf, CredentialOf } from './harness-provider'
+import type {
+  AuthKeyOf,
+  AuthStrategiesOf,
+  CredentialOf,
+} from './harness-provider'
 
 export type HarnessProviderCredentialsInput = {
   gateway?: VercelCredential
@@ -46,6 +50,18 @@ export type HarnessAuthRegistry = {
 export type ProviderCredentials = {
   [K in ModelProvider]?: CredentialOf<HarnessProviderRegistry[K]>
 }
+export type HarnessAuthStrategies = {
+  [K in HarnessAuthKey]: AuthStrategiesOf<HarnessAuthRegistry[K]>
+}
+
+export type HarnessAuthMetadata = {
+  [K in HarnessAuthKey]: {
+    displayName: HarnessAuthRegistry[K]['displayName']
+    supportedAuthStrategies: HarnessAuthStrategies[K]
+    defaultAuthStrategy: HarnessAuthRegistry[K]['defaultAuthStrategy']
+    apiKeyEnvironmentVariable?: string
+  }
+}
 
 export function createHarnessAuthRegistry(
   harness: HarnessProviderRegistry
@@ -61,6 +77,28 @@ export function harnessAuthKeys(
   return Object.keys(
     createHarnessAuthRegistry(harness)
   ) as HarnessAuthKey[]
+}
+
+export function harnessAuthMetadata(
+  harness: HarnessProviderRegistry
+): HarnessAuthMetadata {
+  const auth = createHarnessAuthRegistry(harness)
+  return Object.fromEntries(
+    Object.entries(auth).map(([key, provider]) => [
+      key,
+      {
+        displayName: provider.displayName,
+        supportedAuthStrategies: provider.supportedAuthStrategies,
+        defaultAuthStrategy: provider.defaultAuthStrategy,
+        ...(provider.apiKeyEnvironmentVariable
+          ? {
+              apiKeyEnvironmentVariable:
+                provider.apiKeyEnvironmentVariable,
+            }
+          : {}),
+      },
+    ])
+  ) as HarnessAuthMetadata
 }
 
 export function createAiProviderRegistry(

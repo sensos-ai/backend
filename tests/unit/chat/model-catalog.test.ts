@@ -18,6 +18,7 @@ const profile = {
   activeProvider: 'codex',
   credentials: {
     codex: {
+      kind: 'oauth',
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
       expiresAt: 123,

@@ -25,14 +25,27 @@ import {
 
 export const DEFAULT_MODEL: GatewayModelId = 'openai/gpt-5.6-terra'
 
-export type VercelCredential = {
+export type VercelOAuthCredential = {
+  kind: 'oauth'
   accessToken: string
   refreshToken?: string
   expiresAt: number
   teamId?: string
 }
 
-export type GatewayLoginOptions = HarnessLoginOptions
+export type VercelApiKeyCredential = {
+  kind: 'apiKey'
+  apiKey: string
+}
+
+export type VercelCredential =
+  | VercelOAuthCredential
+  | VercelApiKeyCredential
+
+export const GATEWAY_AUTH_STRATEGIES = ['oauth-device', 'apiKey'] as const
+export type GatewayLoginOptions = HarnessLoginOptions<
+  { type: 'oauth-device' } | { type: 'apiKey'; apiKey?: string }
+>
 
 export type GatewayCatalogModel = HarnessModel<GatewayModelId>
 
@@ -73,8 +86,12 @@ export const aiGateway = (
 ) => {
   return createGateway({
     apiKey:
-      credential?.accessToken ?? process.env.AI_GATEWAY_API_KEY ?? '',
-    ...(credential?.teamId ? { teamIdOrSlug: credential.teamId } : {}),
+      (credential?.kind === 'oauth'
+        ? credential.accessToken
+        : credential?.apiKey) ?? process.env.AI_GATEWAY_API_KEY,
+    ...(credential?.kind === 'oauth' && credential.teamId
+      ? { teamIdOrSlug: credential.teamId }
+      : {}),
     ...(process.env.SENSOS_GATEWAY_BASE_URL
       ? { baseURL: process.env.SENSOS_GATEWAY_BASE_URL }
       : {}),
@@ -101,6 +118,10 @@ export function createGatewayHarnessProvider(
   return new SensosHarnessProvider({
     sensosId: 'gateway',
     authKey: 'vercel',
+    displayName: 'Vercel AI Gateway',
+    supportedAuthStrategies: GATEWAY_AUTH_STRATEGIES,
+    defaultAuthStrategy: 'oauth-device',
+    apiKeyEnvironmentVariable: 'AI_GATEWAY_API_KEY',
     provider,
     defaultModelId: DEFAULT_MODEL,
     async listModels(): Promise<readonly GatewayCatalogModel[]> {
@@ -123,6 +144,9 @@ export function createGatewayHarnessProvider(
       async login(
         options: GatewayLoginOptions
       ): Promise<VercelCredential> {
+        if (options.strategy.type === 'apiKey') {
+          throw new Error('API-key login is not implemented yet.')
+        }
         const log = dependencies.log ?? console.log
         const error = dependencies.error ?? console.error
         const openUrl = dependencies.openUrl ?? openBrowser
@@ -159,14 +183,25 @@ export function createGatewayHarnessProvider(
               })),
             })
         log('Connected to Vercel AI Gateway.')
-        return { ...oauthCredential, teamId }
+        return { ...oauthCredential, teamId, kind: 'oauth' }
       },
-      token: value => Promise.resolve(value.accessToken),
+      needsRefresh: (value): value is VercelOAuthCredential =>
+        value.kind === 'oauth' && value.expiresAt <= Date.now() + 60_000,
+      token: value =>
+        Promise.resolve(
+          value.kind === 'oauth' ? value.accessToken : value.apiKey
+        ),
       refresh: async value => ({
         ...(await refreshVercelCredential(value, dependencies.fetch)),
         ...(value.teamId ? { teamId: value.teamId } : {}),
+        kind: 'oauth',
       }),
-      user: value => getVercelUser(value, dependencies.fetch),
+      user: value => {
+        if (value.kind === 'apiKey') {
+          throw new Error('User information is unavailable for API keys.')
+        }
+        return getVercelUser(value, dependencies.fetch)
+      },
     },
   })
 }
