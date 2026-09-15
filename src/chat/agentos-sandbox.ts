@@ -1,5 +1,6 @@
 import type { AgentOs } from '@rivet-dev/agentos'
 import { posix } from 'node:path'
+import { recordTiming } from '@/shared/timing'
 import {
   decodeSandboxBytes,
   type CommandInput,
@@ -59,6 +60,9 @@ export function createAgentOsSandbox(
       input: CommandInput,
       runOptions: SandboxRunOptions = {}
     ): Promise<SandboxCommandResult> {
+      const startedAt = Date.now()
+      const mode = typeof input === 'string' ? 'shell' : 'file'
+      recordTiming('agentos.process.start', { sessionId: id, mode })
       const commonOptions = {
         cwd: runOptions.cwd ?? cwd,
         env: runOptions.env,
@@ -66,16 +70,31 @@ export function createAgentOsSandbox(
         timeoutMs: runOptions.timeoutMs,
       }
 
-      const result =
-        typeof input === 'string'
-          ? await vm.process.exec(input, commonOptions)
-          : await vm.process.execFile(
-              input.command,
-              input.args ?? [],
-              commonOptions
-            )
-
-      return normalizeCommandResult(result)
+      try {
+        const result =
+          typeof input === 'string'
+            ? await vm.process.exec(input, commonOptions)
+            : await vm.process.execFile(
+                input.command,
+                input.args ?? [],
+                commonOptions
+              )
+        const normalized = normalizeCommandResult(result)
+        recordTiming('agentos.process.ready', {
+          sessionId: id,
+          mode,
+          exitCode: normalized.exitCode,
+          elapsedMs: Date.now() - startedAt,
+        })
+        return normalized
+      } catch (error) {
+        recordTiming('agentos.process.failed', {
+          sessionId: id,
+          mode,
+          elapsedMs: Date.now() - startedAt,
+        })
+        throw error
+      }
     },
 
     files: {
