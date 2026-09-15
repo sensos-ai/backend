@@ -20,6 +20,7 @@ import {
 import { waitForValue } from './wait'
 
 const executable = resolve('dist/sensos')
+const engineExecutable = resolve('dist/sensos-engine')
 
 async function reserveRuntimePort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -115,6 +116,7 @@ export type CliE2E = {
   waitForScreen(text: string, timeoutMs?: number): Promise<string>
   waitForExit(timeoutMs?: number): Promise<number>
   waitForNoOrphans(timeoutMs?: number): Promise<void>
+  runtimeStatus(): Promise<string>
   connect(
     clientId?: string
   ): ReturnType<
@@ -128,7 +130,11 @@ export type CliE2E = {
 export async function startCliE2E(
   name: string,
   scenario: ScriptedScenario,
-  options: { failRuntimeStartup?: boolean } = {}
+  options: {
+    failRuntimeStartup?: boolean
+    remoteEngine?: boolean
+    testModel?: boolean
+  } = {}
 ): Promise<CliE2E> {
   const id = `${name.replaceAll(/[^a-z0-9]+/gi, '-')}-${crypto.randomUUID()}`
   const root = await mkdtemp(join(tmpdir(), 'sensos-e2e-'))
@@ -170,7 +176,7 @@ export async function startCliE2E(
     SENSOS_RUNTIME_PORT: String(port),
     // Keep lifecycle tests fast. Active and queued runs pin the supervisor,
     // so this short idle window does not weaken detachment coverage.
-    SENSOS_RUNTIME_IDLE_TTL_MS: '100',
+    SENSOS_RUNTIME_IDLE_TTL_MS: options.remoteEngine ? '60000' : '100',
     SENSOS_GATEWAY_BASE_URL: gateway.url,
     AI_GATEWAY_API_KEY: 'e2e-scripted-gateway',
     SENSOS_AI_EVENT_LOG_PATH: join(logs, 'ai-events.log'),
@@ -183,6 +189,45 @@ export async function startCliE2E(
     // exactly the client process without involving the logging bootstrap.
     SENSOS_LOGGING_READY: '1',
     TERM: 'xterm-256color',
+    ...(options.remoteEngine
+      ? {
+          SENSOS_REGISTRY_ENDPOINT: endpoint,
+          SENSOS_STREAMS_URL: `http://127.0.0.1:${port + 2}`,
+        }
+      : {}),
+  }
+  let remoteRuntime: Bun.Subprocess | undefined
+  if (options.remoteEngine) {
+    remoteRuntime = Bun.spawn(
+      [
+        engineExecutable,
+        '__runtime-supervisor',
+        '--root',
+        join(state, 'sensos'),
+      ],
+      { env, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }
+    )
+    await waitForValue(
+      async () => {
+        if (remoteRuntime?.exitCode !== null) {
+          return `exited:${remoteRuntime?.exitCode}`
+        }
+        const status = Bun.spawn([executable, 'runtime', 'status'], {
+          env,
+          stdout: 'pipe',
+          stderr: 'ignore',
+        })
+        const [stdout, exitCode] = await Promise.all([
+          new Response(status.stdout).text(),
+          status.exited,
+        ])
+        return exitCode === 0 && stdout.includes('Runtime ready')
+          ? 'ready'
+          : 'waiting'
+      },
+      value => value === 'ready',
+      { description: 'external Rivet runtime', timeoutMs: 20_000 }
+    )
   }
   let output = ''
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
@@ -195,7 +240,7 @@ export async function startCliE2E(
     const expectProgram = [
       'set timeout -1',
       'log_user 1',
-      `spawn -noecho $env(SENSOS_E2E_EXECUTABLE) ${command} $env(SENSOS_E2E_SESSION_ID) --cwd $env(SENSOS_E2E_WORKSPACE)`,
+      `spawn -noecho $env(SENSOS_E2E_EXECUTABLE) ${command} $env(SENSOS_E2E_SESSION_ID) --cwd $env(SENSOS_E2E_WORKSPACE)${options.testModel ? ' --test-model' : ''}${options.remoteEngine ? '' : ' --local-engine'}`,
       'set pid_file [open $env(SENSOS_E2E_CLI_PID_PATH) w]',
       'puts $pid_file [exp_pid]',
       'close $pid_file',
@@ -358,6 +403,22 @@ export async function startCliE2E(
         )
       }
     },
+    async runtimeStatus() {
+      const status = Bun.spawn([executable, 'runtime', 'status'], {
+        env,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(status.stdout).text(),
+        new Response(status.stderr).text(),
+        status.exited,
+      ])
+      if (exitCode !== 0) {
+        throw new Error(`Runtime status failed: ${stderr}`)
+      }
+      return stdout.trim()
+    },
     connect(clientId = `e2e-observer-${crypto.randomUUID()}`) {
       return createClient<typeof registry>(endpoint).session.getOrCreate(
         [sessionId],
@@ -378,6 +439,10 @@ export async function startCliE2E(
         stderr: 'ignore',
       })
       await Promise.race([runtimeStop.exited, Bun.sleep(8_000)])
+      if (remoteRuntime?.exitCode === null) {
+        remoteRuntime.kill('SIGTERM')
+        await Promise.race([remoteRuntime.exited, Bun.sleep(3_000)])
+      }
       await gateway.stop()
       await Promise.allSettled(captures)
       catalog.close()

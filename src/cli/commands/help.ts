@@ -24,6 +24,7 @@ Options:
   --cwd <path>                Set the session workspace
   --model <id>                Set the default model
   --test-model                Use the deterministic test model
+  --local-engine              Run sessions through the optional local engine
   -h, --help                  Show help
 
 Providers:

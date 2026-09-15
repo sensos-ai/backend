@@ -1,6 +1,6 @@
 import { confirm, select } from '@inquirer/prompts'
 import { resolve } from 'node:path'
-import { createClient, type ActorConn } from 'rivetkit/client'
+import type { ActorConn } from 'rivetkit/client'
 import { configureDefaultLogger } from 'rivetkit/log'
 import { DeferredSessionChatTransport } from '@/chat/transport'
 import {
@@ -10,7 +10,6 @@ import {
 import { AgentTUIRunner, TerminalRenderer } from '@/chat/tui'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import type { SessionActor } from '@/runtime/actors/session/types'
-import type { registry } from '@/runtime/actors/registry'
 import {
   openSessionCatalog,
   SESSION_CATALOG_PATH_ENV,
@@ -35,14 +34,14 @@ import {
   readFreshProviderProfile,
   updateProviderProfile,
 } from '@/auth/profile'
+import { runtimeStatus, stopRuntime } from '@/runtime/client'
 import {
-  acquireRuntime,
-  RUNTIME_ENDPOINT,
-  runRuntimeSupervisor,
-  runtimeStatus,
-  stopRuntime,
-  type RuntimeLease,
-} from '@/runtime'
+  connectRivetEngine,
+  resolveRivetEngineTarget,
+  type RivetEngineConnection,
+  type RivetEngineTarget,
+} from '@/runtime/engine-transport'
+import { createRunStreamReader } from '@/runtime/durable-run-stream'
 import {
   deleteLocalSessionActor,
   waitForLocalSessionDeletion,
@@ -80,6 +79,7 @@ type ChatOptions = {
   features: HarnessFeatures
   pickSession?: boolean
   createSession?: boolean
+  engineTarget: RivetEngineTarget
 }
 
 async function chooseProvider(provider: ModelProvider): Promise<void> {
@@ -145,7 +145,7 @@ async function providerInfo(): Promise<void> {
 async function runChatSession(
   options: ChatOptions,
   catalog: SessionCatalog,
-  runtime: RuntimeLease
+  engine: Promise<RivetEngineConnection>
 ): Promise<'exit' | 'switch-session'> {
   let connection: SessionConnection | undefined
   let sessionDeleted = false
@@ -194,8 +194,8 @@ async function runChatSession(
       ? modelRefForProvider(initialProvider, options.model)
       : defaultModelRef(initialProvider)
     const ready = (async () => {
-      await runtime?.ready
-      const client = createClient<typeof registry>(RUNTIME_ENDPOINT)
+      const engineConnection = await engine
+      const client = engineConnection.client
       const handle = client.session.getOrCreate([sessionId], {
         createWithInput: {
           sessionId,
@@ -220,7 +220,16 @@ async function runChatSession(
       })
       .catch(() => undefined)
 
-    const chatTransport = new DeferredSessionChatTransport(connectionReady)
+    const chatTransport = new DeferredSessionChatTransport(
+      connectionReady,
+      {
+        readStream: async function* (streamOptions) {
+          yield* createRunStreamReader((await engine).streamsEndpoint)(
+            streamOptions
+          )
+        },
+      }
+    )
     outcome = await new AgentTUIRunner({
       renderer,
       title: `sensos · ${catalogSession.title ?? sessionId}`,
@@ -356,8 +365,9 @@ async function runChatSession(
             await activeConnection?.dispose()
             connection = undefined
             sessionDeleted = true
-            await deleteLocalSessionActor(RUNTIME_ENDPOINT, sessionId)
-            await waitForLocalSessionDeletion(RUNTIME_ENDPOINT, sessionId)
+            const engineEndpoint = (await engine).endpoint
+            await deleteLocalSessionActor(engineEndpoint, sessionId)
+            await waitForLocalSessionDeletion(engineEndpoint, sessionId)
             return 'exit'
           },
         },
@@ -391,11 +401,11 @@ async function runChat(
   catalog: SessionCatalog,
   root: string
 ): Promise<void> {
-  const runtime = acquireRuntime(root)
+  const engine = connectRivetEngine(options.engineTarget, root)
   let nextOptions = options
   try {
     while (true) {
-      const outcome = await runChatSession(nextOptions, catalog, runtime)
+      const outcome = await runChatSession(nextOptions, catalog, engine)
       if (outcome !== 'switch-session') return
       nextOptions = {
         ...options,
@@ -405,14 +415,15 @@ async function runChat(
       }
     }
   } finally {
-    await runtime.release()
+    await (await engine).release()
   }
 }
 
 async function deleteSessions(
   catalog: SessionCatalog,
   root: string,
-  cwd: string
+  cwd: string,
+  target: RivetEngineTarget
 ): Promise<void> {
   const sessions = await listLocalSessions(catalog, resolve(cwd))
   if (sessions.length === 0) {
@@ -444,18 +455,14 @@ async function deleteSessions(
   await Promise.all(
     selected.map(session => catalog.tombstone(session.sessionId))
   )
-  const runtime = acquireRuntime(root)
+  const engine = await connectRivetEngine(target, root)
   try {
-    await runtime.ready
     for (const session of selected) {
-      await deleteLocalSessionActor(RUNTIME_ENDPOINT, session.sessionId)
-      await waitForLocalSessionDeletion(
-        RUNTIME_ENDPOINT,
-        session.sessionId
-      )
+      await deleteLocalSessionActor(engine.endpoint, session.sessionId)
+      await waitForLocalSessionDeletion(engine.endpoint, session.sessionId)
     }
   } finally {
-    await runtime.release()
+    await engine.release()
   }
   console.log(
     `Deleted ${selected.length} ${selected.length === 1 ? 'session' : 'sessions'}.`
@@ -464,7 +471,8 @@ async function deleteSessions(
 
 async function nukeSessions(
   catalog: SessionCatalog,
-  root: string
+  root: string,
+  target: RivetEngineTarget
 ): Promise<void> {
   const sessions = await listLocalSessions(catalog)
   if (sessions.length === 0) {
@@ -472,21 +480,20 @@ async function nukeSessions(
     return
   }
 
-  const runtime = acquireRuntime(root)
+  const engine = await connectRivetEngine(target, root)
   try {
-    await runtime.ready
     await Promise.all(
       sessions.map(async session => {
-        await deleteLocalSessionActor(RUNTIME_ENDPOINT, session.sessionId)
+        await deleteLocalSessionActor(engine.endpoint, session.sessionId)
         await waitForLocalSessionDeletion(
-          RUNTIME_ENDPOINT,
+          engine.endpoint,
           session.sessionId
         )
       })
     )
     await catalog.purge(sessions.map(session => session.sessionId))
   } finally {
-    await runtime.release()
+    await engine.release()
   }
   console.log(`Deleted ${sessions.length} sessions.`)
 }
@@ -503,6 +510,9 @@ function readOptions(args: string[], sessionId?: string): ChatOptions {
     model: valueFor('--model'),
     features: resolveHarnessFeatures({
       ...(args.includes('--test-model') ? { useMockModel: true } : {}),
+    }),
+    engineTarget: resolveRivetEngineTarget({
+      localEngine: args.includes('--local-engine'),
     }),
   }
 }
@@ -526,14 +536,6 @@ async function main(): Promise<void> {
         : process.env.SENSOS_CLI_INTERACTIVE === '1',
   })
   const rawArgs = invocation.argv
-  if (rawArgs[0] === '__runtime-supervisor') {
-    const rootIndex = rawArgs.indexOf('--root')
-    const root = rootIndex >= 0 ? rawArgs[rootIndex + 1] : undefined
-    if (!root) throw new Error('Runtime supervisor requires --root')
-    await runRuntimeSupervisor(root)
-    return
-  }
-
   const normalized = commandArguments(rawArgs)
   const [command, ...args] = normalized
   if (command === 'help') {
@@ -582,7 +584,13 @@ async function main(): Promise<void> {
   const catalog = openSessionCatalog(catalogPath)
   if (command === 'reset' || command === 'uninstall') {
     try {
-      await nukeSessions(catalog, root)
+      await nukeSessions(
+        catalog,
+        root,
+        resolveRivetEngineTarget({
+          localEngine: args.includes('--local-engine'),
+        })
+      )
     } finally {
       catalog.close()
     }
@@ -625,11 +633,24 @@ async function main(): Promise<void> {
     return
   }
   if (command === 'sessions' && args[0] === 'delete') {
-    await deleteSessions(catalog, root, process.cwd())
+    await deleteSessions(
+      catalog,
+      root,
+      process.cwd(),
+      resolveRivetEngineTarget({
+        localEngine: args.includes('--local-engine'),
+      })
+    )
     return
   }
   if (command === 'sessions' && args[0] === 'nuke') {
-    await nukeSessions(catalog, root)
+    await nukeSessions(
+      catalog,
+      root,
+      resolveRivetEngineTarget({
+        localEngine: args.includes('--local-engine'),
+      })
+    )
     return
   }
   if (command === 'resume' || command === 'session') {

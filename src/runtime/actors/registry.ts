@@ -5,7 +5,7 @@ import { RUNTIME_ENDPOINT } from '@/runtime/constants'
 export const registry = setup({
   use: { session: sessionAgent },
   runtime: 'native',
-  endpoint: RUNTIME_ENDPOINT,
+  endpoint: process.env.RIVET_ENDPOINT ?? RUNTIME_ENDPOINT,
   startEngine: false,
   startServices: false,
   noWelcome: true,

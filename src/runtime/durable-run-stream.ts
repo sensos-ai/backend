@@ -11,14 +11,16 @@ import { RUNTIME_STREAMS_ENDPOINT } from './constants'
 
 const RUN_STREAM_CONTENT_TYPE = 'application/json'
 
-function streamsEndpoint(): string {
+function streamsEndpoint(override?: string): string {
   return (
-    process.env.RIVET_TEST_STREAMS_ENDPOINT ?? RUNTIME_STREAMS_ENDPOINT
+    override ??
+    process.env.RIVET_TEST_STREAMS_ENDPOINT ??
+    RUNTIME_STREAMS_ENDPOINT
   )
 }
 
-export function runStreamUrl(runId: string): string {
-  return `${streamsEndpoint()}/durable-streams/v1/stream/sensos/runs/${encodeURIComponent(runId)}`
+export function runStreamUrl(runId: string, endpoint?: string): string {
+  return `${streamsEndpoint(endpoint)}/durable-streams/v1/stream/sensos/runs/${encodeURIComponent(runId)}`
 }
 
 function runStream(runId: string): DurableStream {
@@ -77,9 +79,10 @@ export async function* readRunStream(options: {
   runId: string
   offset?: Offset
   signal?: AbortSignal
+  endpoint?: string
 }): AsyncGenerator<RunStreamItem> {
   const response = await readDurableStream<UIMessageChunk>({
-    url: runStreamUrl(options.runId),
+    url: runStreamUrl(options.runId, options.endpoint),
     offset: options.offset ?? '-1',
     live: 'sse',
     signal: options.signal,
@@ -133,4 +136,12 @@ export async function* readRunStream(options: {
   } finally {
     unsubscribe()
   }
+}
+
+export function createRunStreamReader(endpoint: string) {
+  return (options: {
+    runId: string
+    offset?: Offset
+    signal?: AbortSignal
+  }) => readRunStream({ ...options, endpoint })
 }

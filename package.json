@@ -6,6 +6,7 @@
   "packageManager": "bun@1.4.0",
   "bin": {
     "sensos": "./dist/sensos",
+    "sensos-engine": "./dist/sensos-engine",
     "sensos-dev": "./src/cli/bootstrap.ts"
   },
   "scripts": {

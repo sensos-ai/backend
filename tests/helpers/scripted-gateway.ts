@@ -48,85 +48,93 @@ export function startScriptedGateway(
 ): ScriptedGateway {
   const controller = new ScriptedScenarioController(scenario)
   let stopped = false
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    idleTimeout: 60,
-    async fetch(request) {
-      const url = new URL(request.url)
-      if (
-        request.method !== 'POST' ||
-        url.pathname !== '/language-model'
-      ) {
-        return new Response('Not found', { status: 404 })
-      }
-      let body: unknown
-      try {
-        body = await request.json()
-      } catch {
-        return Response.json(
-          { error: 'Expected a JSON request' },
-          { status: 400 }
-        )
-      }
-      const modelId =
-        request.headers.get('ai-language-model-id') ?? 'unknown'
-      const streaming =
-        request.headers.get('ai-language-model-streaming') === 'true'
-      try {
-        const call = {
-          ...(body as Record<string, unknown>),
-          abortSignal: request.signal,
-        }
-        const consumed = controller.consume(
-          call as Parameters<ScriptedScenarioController['consume']>[0],
-          modelId
-        )
-        const stream = await streamScriptedTurn(
-          consumed.turn,
-          consumed.actual,
-          controller,
-          request.signal,
-          { allowMalformed: true }
-        )
-        if (!streaming) {
-          const chunks = await Array.fromAsync(stream)
-          const text = chunks
-            .filter(chunk => chunk.type === 'text-delta')
-            .map(chunk => chunk.delta)
-            .join('')
-          const finish = chunks.find(chunk => chunk.type === 'finish')
-          return Response.json({
-            content: [{ type: 'text', text }],
-            finishReason: finish?.finishReason ?? {
-              unified: 'stop',
-              raw: 'stop',
-            },
-            usage: finish?.usage,
-            warnings: [],
-          })
-        }
-        return new Response(eventStream(stream), {
-          headers: {
-            'content-type': 'text/event-stream',
-            'cache-control': 'no-cache',
-            connection: 'keep-alive',
-          },
-        })
-      } catch (error) {
-        return Response.json(
-          {
-            error: {
-              type: 'invalid_request_error',
-              message:
-                error instanceof Error ? error.message : String(error),
-            },
-          },
-          { status: 400 }
-        )
-      }
-    },
-  })
+  let server: ReturnType<typeof Bun.serve>
+  for (let attempt = 0; ; attempt++) {
+    try {
+      server = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 10_000 + Math.floor(Math.random() * 40_000),
+        idleTimeout: 60,
+        async fetch(request) {
+          const url = new URL(request.url)
+          if (
+            request.method !== 'POST' ||
+            url.pathname !== '/language-model'
+          ) {
+            return new Response('Not found', { status: 404 })
+          }
+          let body: unknown
+          try {
+            body = await request.json()
+          } catch {
+            return Response.json(
+              { error: 'Expected a JSON request' },
+              { status: 400 }
+            )
+          }
+          const modelId =
+            request.headers.get('ai-language-model-id') ?? 'unknown'
+          const streaming =
+            request.headers.get('ai-language-model-streaming') === 'true'
+          try {
+            const call = {
+              ...(body as Record<string, unknown>),
+              abortSignal: request.signal,
+            }
+            const consumed = controller.consume(
+              call as Parameters<ScriptedScenarioController['consume']>[0],
+              modelId
+            )
+            const stream = await streamScriptedTurn(
+              consumed.turn,
+              consumed.actual,
+              controller,
+              request.signal,
+              { allowMalformed: true }
+            )
+            if (!streaming) {
+              const chunks = await Array.fromAsync(stream)
+              const text = chunks
+                .filter(chunk => chunk.type === 'text-delta')
+                .map(chunk => chunk.delta)
+                .join('')
+              const finish = chunks.find(chunk => chunk.type === 'finish')
+              return Response.json({
+                content: [{ type: 'text', text }],
+                finishReason: finish?.finishReason ?? {
+                  unified: 'stop',
+                  raw: 'stop',
+                },
+                usage: finish?.usage,
+                warnings: [],
+              })
+            }
+            return new Response(eventStream(stream), {
+              headers: {
+                'content-type': 'text/event-stream',
+                'cache-control': 'no-cache',
+                connection: 'keep-alive',
+              },
+            })
+          } catch (error) {
+            return Response.json(
+              {
+                error: {
+                  type: 'invalid_request_error',
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                },
+              },
+              { status: 400 }
+            )
+          }
+        },
+      })
+      break
+    } catch (error) {
+      if (attempt >= 49) throw error
+    }
+  }
 
   return {
     url: `http://${server.hostname}:${server.port}`,

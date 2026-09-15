@@ -1,7 +1,7 @@
 import { lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { runtimeStatus, stopRuntime } from '@/runtime'
+import { runtimeStatus, stopRuntime } from '@/runtime/client'
 
 const PROFILE_BLOCK_START = '# >>> sensos >>>'
 const PROFILE_BLOCK_END = '# <<< sensos <<<'
@@ -107,10 +107,19 @@ export async function uninstallSensos(home = homedir()): Promise<void> {
 
   await Promise.all([
     rm(join(home, '.bun', 'bin', 'sensos'), { force: true }),
+    rm(join(home, '.bun', 'bin', 'sensos-engine'), { force: true }),
     rm(join(home, '.bun', 'bin', 'sensos-dev'), { force: true }),
     rm(join(home, '.local', 'bin', 'sensos'), { force: true }),
+    rm(join(home, '.local', 'bin', 'sensos-engine'), { force: true }),
     ...(linkedPackageRoot
-      ? [rm(join(linkedPackageRoot, 'dist', 'sensos'), { force: true })]
+      ? [
+          rm(join(linkedPackageRoot, 'dist', 'sensos'), {
+            force: true,
+          }),
+          rm(join(linkedPackageRoot, 'dist', 'sensos-engine'), {
+            force: true,
+          }),
+        ]
       : []),
   ])
 }

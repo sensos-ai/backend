@@ -98,6 +98,14 @@ const runtimeBuildId = createHash('sha256')
   .update(JSON.stringify(assetManifest))
   .digest('hex')
 
+const engineEndpoint = process.env.SENSOS_REGISTRY_ENDPOINT?.trim() ?? ''
+const streamsEndpoint = process.env.SENSOS_STREAMS_URL?.trim() ?? ''
+if (Boolean(engineEndpoint) !== Boolean(streamsEndpoint)) {
+  throw new Error(
+    'Release builds require both SENSOS_REGISTRY_ENDPOINT and SENSOS_STREAMS_URL when embedding a remote engine'
+  )
+}
+
 const makeNativeRuntimeBundlable: BunPlugin = {
   name: 'bundle-rivetkit-native-runtime',
   setup(build) {
@@ -165,21 +173,37 @@ const makeNativeRuntimeBundlable: BunPlugin = {
   },
 }
 
-const result = await Bun.build({
+const define = {
+  __SENSOS_ASSET_MANIFEST__: JSON.stringify(assetManifest),
+  __SENSOS_RUNTIME_BUILD_ID__: JSON.stringify(runtimeBuildId),
+  __SENSOS_REGISTRY_ENDPOINT__: JSON.stringify(engineEndpoint),
+  __SENSOS_STREAMS_URL__: JSON.stringify(streamsEndpoint),
+}
+
+const clientResult = await Bun.build({
   entrypoints: ['src/cli/bootstrap.ts'],
-  plugins: [makeNativeRuntimeBundlable],
   minify: true,
   sourcemap: 'linked',
-  define: {
-    __SENSOS_ASSET_MANIFEST__: JSON.stringify(assetManifest),
-    __SENSOS_RUNTIME_BUILD_ID__: JSON.stringify(runtimeBuildId),
-  },
+  define,
   compile: {
     outfile: 'dist/sensos',
   },
 })
 
-if (!result.success) {
-  for (const log of result.logs) console.error(log)
+const engineResult = await Bun.build({
+  entrypoints: ['src/runtime/engine-bootstrap.ts'],
+  plugins: [makeNativeRuntimeBundlable],
+  minify: true,
+  sourcemap: 'linked',
+  define,
+  compile: {
+    outfile: 'dist/sensos-engine',
+  },
+})
+
+if (!clientResult.success || !engineResult.success) {
+  for (const log of [...clientResult.logs, ...engineResult.logs]) {
+    console.error(log)
+  }
   process.exit(1)
 }
