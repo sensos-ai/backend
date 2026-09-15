@@ -31,6 +31,7 @@ import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 import { defaultModelRef } from '@/chat/harness/providers'
 import { readProviderProfileSync } from '@/auth/profile'
 import { productStateDir } from '@/config/paths'
+import { recordTiming } from '@/shared/timing'
 
 const AGENTOS_SOFTWARE_ENV = 'SENSOS_AGENTOS_SOFTWARE_PATHS'
 
@@ -220,6 +221,10 @@ export const onWake: OnWake = async context => {
 }
 
 export const onConnect: OnConnect = async context => {
+  const startedAt = Date.now()
+  recordTiming('actor.connect.start', {
+    sessionId: context.state.sessionId,
+  })
   migrateLegacySessionModel(context)
   const meta = await getSessionMeta(context.db)
   await recoverOrphanedActiveRun({
@@ -231,9 +236,18 @@ export const onConnect: OnConnect = async context => {
   if (catalog)
     context.waitUntil(catalog.markOpened(context.state.sessionId))
   scheduleMissingSessionTitle(context)
+  recordTiming('actor.connect.ready', {
+    sessionId: context.state.sessionId,
+    elapsedMs: Date.now() - startedAt,
+  })
 }
 
 export const createVars: CreateVars = async context => {
+  const startedAt = Date.now()
+  recordTiming('actor.agentos.start', {
+    sessionId: context.state.sessionId,
+    testModel: context.state.config.features.useMockModel,
+  })
   const software = parseAgentOsSoftwarePaths(
     process.env[AGENTOS_SOFTWARE_ENV]
   )
@@ -251,20 +265,26 @@ export const createVars: CreateVars = async context => {
     }
   }
 
-  return {
-    vm: await AgentOs.create({
-      ...(software ? { defaultSoftware: false, software } : {}),
-      mounts: [
-        {
-          path: context.state.config.guestCwd,
-          plugin: createHostDirBackend({
-            hostPath,
-            readOnly: false,
-          }),
+  const vm = await AgentOs.create({
+    ...(software ? { defaultSoftware: false, software } : {}),
+    mounts: [
+      {
+        path: context.state.config.guestCwd,
+        plugin: createHostDirBackend({
+          hostPath,
           readOnly: false,
-        },
-      ],
-    }),
+        }),
+        readOnly: false,
+      },
+    ],
+  })
+  recordTiming('actor.agentos.ready', {
+    sessionId: context.state.sessionId,
+    elapsedMs: Date.now() - startedAt,
+  })
+
+  return {
+    vm,
     activeRun: undefined,
   }
 }

@@ -55,6 +55,7 @@ import {
 } from './sessions'
 import { runAuthCommand } from './auth'
 import { normalizeCliInvocation } from '../state'
+import { recordTiming } from '@/shared/timing'
 
 configureDefaultLogger(
   process.env.SENSOS_LOG_LEVEL === 'warn' ? 'warn' : 'silent'
@@ -194,7 +195,13 @@ async function runChatSession(
       ? modelRefForProvider(initialProvider, options.model)
       : defaultModelRef(initialProvider)
     const ready = (async () => {
+      const startedAt = Date.now()
+      recordTiming('client.session.connect_start', { sessionId })
       const engineConnection = await engine
+      recordTiming('client.engine.ready', {
+        sessionId,
+        elapsedMs: Date.now() - startedAt,
+      })
       const client = engineConnection.client
       const handle = client.session.getOrCreate([sessionId], {
         createWithInput: {
@@ -208,7 +215,15 @@ async function runChatSession(
       const nextConnection = handle.connect({ clientId })
       connection = nextConnection
       await nextConnection.setFeatures(options.features)
+      recordTiming('client.session.connected', {
+        sessionId,
+        elapsedMs: Date.now() - startedAt,
+      })
       const snapshot = await nextConnection.getSession()
+      recordTiming('client.session.hydrated', {
+        sessionId,
+        elapsedMs: Date.now() - startedAt,
+      })
       selectedModel = snapshot.model
       return { connection: nextConnection, snapshot }
     })()

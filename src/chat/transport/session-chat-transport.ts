@@ -16,6 +16,7 @@ import {
 } from '@/runtime/durable-run-stream'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
 import type { ModelRef } from '@/chat/harness/providers/model'
+import { recordTiming } from '@/shared/timing'
 
 export type SessionConnection = ActorConn<SessionActor>
 
@@ -191,6 +192,8 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     } = {}
   ): Promise<DeliveryRoutedEvent> {
     const id = options.id ?? createIdempotencyId()
+    const startedAt = Date.now()
+    recordTiming('client.delivery.start', { requestId: id })
     let cleanup = () => {}
     const receipt = new Promise<DeliveryRoutedEvent>((resolve, reject) => {
       let settled = false
@@ -238,13 +241,26 @@ export class SessionChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
       })
       if (!options.waitForStart || routed.status !== 'queued') {
         cleanup()
+        recordTiming('client.delivery.routed', {
+          requestId: id,
+          runId: routed.runId,
+          status: routed.status,
+          elapsedMs: Date.now() - startedAt,
+        })
         return routed
       }
     } catch (error) {
       cleanup()
       throw error
     }
-    return receipt
+    const routed = await receipt
+    recordTiming('client.delivery.routed', {
+      requestId: id,
+      runId: routed.runId,
+      status: routed.status,
+      elapsedMs: Date.now() - startedAt,
+    })
+    return routed
   }
 
   async sendMessages({

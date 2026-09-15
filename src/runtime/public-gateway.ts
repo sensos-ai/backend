@@ -1,5 +1,9 @@
+import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import { recordTiming } from '@/shared/timing'
+
 const RIVET_PREFIX = '/api/rivet'
 const STREAMS_PREFIX = '/durable-streams'
+const createGatewayTraceId = createIdGeneratorWithPrefix('gateway')
 
 type GatewayRoute = {
   target: URL
@@ -9,6 +13,10 @@ type GatewayRoute = {
 export type WebSocketProxyData = {
   upstream: WebSocket
   pending: Array<string | ArrayBuffer>
+  traceId: string
+  startedAt: number
+  receivedUpstreamMessage: boolean
+  receivedDownstreamMessage: boolean
 }
 
 const WebSocketWithOptions = WebSocket as unknown as new (
@@ -111,6 +119,12 @@ export function createPublicGateway(options: {
       const isUpgrade =
         request.headers.get('upgrade')?.toLowerCase() === 'websocket'
       if (route.websocket && isUpgrade) {
+        const traceId = createGatewayTraceId()
+        const startedAt = Date.now()
+        recordTiming('gateway.websocket.upgrade', {
+          traceId,
+          path: new URL(request.url).pathname,
+        })
         const target = new URL(route.target)
         target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:'
         const upstream = new WebSocketWithOptions(target, {
@@ -120,7 +134,14 @@ export function createPublicGateway(options: {
         upstream.binaryType = 'arraybuffer'
         const pending: Array<string | ArrayBuffer> = []
         const upgraded = server.upgrade(request, {
-          data: { upstream, pending },
+          data: {
+            upstream,
+            pending,
+            traceId,
+            startedAt,
+            receivedUpstreamMessage: false,
+            receivedDownstreamMessage: false,
+          },
         })
         if (!upgraded) {
           upstream.close()
@@ -129,20 +150,44 @@ export function createPublicGateway(options: {
         return undefined
       }
 
-      return fetch(new Request(route.target, request))
+      const startedAt = Date.now()
+      const response = await fetch(new Request(route.target, request))
+      recordTiming('gateway.http.response', {
+        elapsedMs: Date.now() - startedAt,
+        method: request.method,
+        path: new URL(request.url).pathname,
+        status: response.status,
+      })
+      return response
     },
     websocket: {
       data: {} as WebSocketProxyData,
       open(client: Bun.ServerWebSocket<WebSocketProxyData>) {
         const { upstream, pending } = client.data
         upstream.addEventListener('open', () => {
+          recordTiming('gateway.websocket.upstream_open', {
+            traceId: client.data.traceId,
+            elapsedMs: Date.now() - client.data.startedAt,
+          })
           for (const message of pending) upstream.send(message)
           pending.length = 0
         })
         upstream.addEventListener('message', event => {
+          if (!client.data.receivedUpstreamMessage) {
+            client.data.receivedUpstreamMessage = true
+            recordTiming('gateway.websocket.first_upstream_message', {
+              traceId: client.data.traceId,
+              elapsedMs: Date.now() - client.data.startedAt,
+            })
+          }
           client.send(event.data)
         })
         upstream.addEventListener('close', event => {
+          recordTiming('gateway.websocket.upstream_close', {
+            traceId: client.data.traceId,
+            elapsedMs: Date.now() - client.data.startedAt,
+            code: event.code,
+          })
           client.close(validCloseCode(event.code), event.reason)
         })
         upstream.addEventListener('error', () => {
@@ -154,6 +199,13 @@ export function createPublicGateway(options: {
         message: string | Buffer
       ) {
         const { upstream, pending } = client.data
+        if (!client.data.receivedDownstreamMessage) {
+          client.data.receivedDownstreamMessage = true
+          recordTiming('gateway.websocket.first_downstream_message', {
+            traceId: client.data.traceId,
+            elapsedMs: Date.now() - client.data.startedAt,
+          })
+        }
         const outgoing =
           typeof message === 'string' ? message : copyMessage(message)
         if (upstream.readyState === WebSocket.OPEN) upstream.send(outgoing)

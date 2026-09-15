@@ -10,11 +10,17 @@ import {
   retainRuntimeActivity,
   runtimeActivityKey,
 } from '@/runtime/activity'
+import { recordTiming } from '@/shared/timing'
 
 export const deliver: SessionActions['deliver'] = async (
   context,
   inboxMessage
 ) => {
+  const startedAt = Date.now()
+  recordTiming('actor.delivery.start', {
+    sessionId: context.state.sessionId,
+    requestId: inboxMessage.id,
+  })
   const activityKey = runtimeActivityKey(inboxMessage.id)
   context.keepAwake(retainRuntimeActivity(activityKey))
   const activeRun = context.vars.activeRun
@@ -79,5 +85,10 @@ export const deliver: SessionActions['deliver'] = async (
     origin: inboxMessage.origin,
   } satisfies DeliveryRoutedEvent
   context.broadcast('deliveryRouted', receipt)
+  recordTiming('actor.delivery.queued', {
+    sessionId: context.state.sessionId,
+    requestId: inboxMessage.id,
+    elapsedMs: Date.now() - startedAt,
+  })
   return receipt
 }

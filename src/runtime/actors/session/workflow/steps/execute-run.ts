@@ -39,6 +39,7 @@ import {
   appendRunStreamChunk,
   closeRunStream,
 } from '@/runtime/durable-run-stream'
+import { recordTiming } from '@/shared/timing'
 
 const terminalStatuses = new Set([
   'cancelled',
@@ -121,6 +122,7 @@ export async function executeRun(
     timeout: 0,
     maxRetries: 0,
     run: async step => {
+      const executionStartedAt = Date.now()
       const run = await getRun(step.db, input.runId)
       if (!run || terminalStatuses.has(run.status)) {
         releaseRuntimeActivity(activityKey)
@@ -129,10 +131,18 @@ export async function executeRun(
 
       let sequence = 0
       const publishFrame = async (chunk: UIMessageChunk) => {
+        const firstFrame = sequence === 0
         const frameSequence = sequence
         await appendRunFrame(step.db, run.id, frameSequence, chunk)
         sequence += 1
         await appendRunStreamChunk(run.id, frameSequence, chunk)
+        if (firstFrame) {
+          recordTiming('actor.run.first_frame', {
+            sessionId: step.state.sessionId,
+            runId: run.id,
+            elapsedMs: Date.now() - executionStartedAt,
+          })
+        }
         step.broadcast('frame', {
           runId: run.id,
           seq: frameSequence,
@@ -310,6 +320,10 @@ export async function executeRun(
       }
 
       try {
+        recordTiming('actor.run.execution_start', {
+          sessionId: step.state.sessionId,
+          runId: run.id,
+        })
         await updateRun(step.db, run.id, {
           status: 'running',
           error: null,
@@ -378,6 +392,12 @@ export async function executeRun(
           })
         }
         publishStatus(status, failure)
+        recordTiming('actor.run.finalized', {
+          sessionId: step.state.sessionId,
+          runId: run.id,
+          status,
+          elapsedMs: Date.now() - executionStartedAt,
+        })
       } catch (error) {
         const failure = errorMessage(error)
         const status = abortController.signal.aborted

@@ -8,6 +8,7 @@ import {
 } from '@durable-streams/client'
 import type { UIMessageChunk } from 'ai'
 import { RUNTIME_STREAMS_ENDPOINT } from './constants'
+import { recordTiming } from '@/shared/timing'
 
 const RUN_STREAM_CONTENT_TYPE = 'application/json'
 
@@ -81,6 +82,8 @@ export async function* readRunStream(options: {
   signal?: AbortSignal
   endpoint?: string
 }): AsyncGenerator<RunStreamItem> {
+  const startedAt = Date.now()
+  recordTiming('client.stream.connect_start', { runId: options.runId })
   const response = await readDurableStream<UIMessageChunk>({
     url: runStreamUrl(options.runId, options.endpoint),
     offset: options.offset ?? '-1',
@@ -92,6 +95,7 @@ export async function* readRunStream(options: {
   let wake: (() => void) | undefined
   let finished = false
   let failure: unknown
+  let receivedChunk = false
   const notify = () => {
     wake?.()
     wake = undefined
@@ -117,7 +121,13 @@ export async function* readRunStream(options: {
       const batch = batches.shift()
       if (!batch) {
         if (failure) throw failure
-        if (finished) return
+        if (finished) {
+          recordTiming('client.stream.closed', {
+            runId: options.runId,
+            elapsedMs: Date.now() - startedAt,
+          })
+          return
+        }
         await new Promise<void>(resolve => {
           wake = resolve
         })
@@ -125,6 +135,13 @@ export async function* readRunStream(options: {
       }
 
       for (const [index, chunk] of batch.items.entries()) {
+        if (!receivedChunk) {
+          receivedChunk = true
+          recordTiming('client.stream.first_chunk', {
+            runId: options.runId,
+            elapsedMs: Date.now() - startedAt,
+          })
+        }
         yield {
           chunk,
           ...(index === batch.items.length - 1

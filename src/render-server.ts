@@ -29,6 +29,7 @@ async function waitForEndpoint(
 
 // A hosted engine has no local CLI lease to keep its supervisor alive.
 process.env.SENSOS_RUNTIME_IDLE_TTL_MS ??= String(24 * 60 * 60_000)
+process.env.SENSOS_TIMING_LOGS ??= '1'
 
 void runRuntimeSupervisor(productStateDir())
 await Promise.all([

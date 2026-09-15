@@ -26,6 +26,7 @@ import {
   runtimeActivityKey,
 } from '@/runtime/activity'
 import { ensureRunStream } from '@/runtime/durable-run-stream'
+import { recordTiming } from '@/shared/timing'
 
 const createMessageId = createIdGeneratorWithPrefix('msg')
 const createRunId = createIdGeneratorWithPrefix('run')
@@ -62,6 +63,7 @@ export async function submitRun(
   const activityKey = runtimeActivityKey(queued.body.idempotencyId)
   retainRuntimeActivity(activityKey)
   const submission = await context.step('submit-run', async step => {
+    const startedAt = Date.now()
     const result = await submitRunToDatabase(step.db, {
       runId: createRunId(),
       idempotencyId: queued.body.idempotencyId,
@@ -70,7 +72,13 @@ export async function submitRun(
       assistantMessageId: createMessageId(),
     })
 
+    const streamStartedAt = Date.now()
     await ensureRunStream(result.run.id)
+    recordTiming('actor.stream.created', {
+      sessionId: step.state.sessionId,
+      runId: result.run.id,
+      elapsedMs: Date.now() - streamStartedAt,
+    })
 
     if (result.created) {
       const catalog = configuredSessionCatalog()
@@ -145,6 +153,12 @@ export async function submitRun(
       )?.sensosOrigin as InboxMessage['origin'] | undefined) ?? {
         type: 'system' as const,
       },
+    })
+    recordTiming('actor.run.submitted', {
+      sessionId: step.state.sessionId,
+      runId: result.run.id,
+      requestId: queued.body.idempotencyId,
+      elapsedMs: Date.now() - startedAt,
     })
 
     return {
