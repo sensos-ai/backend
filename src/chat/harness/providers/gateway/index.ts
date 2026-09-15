@@ -141,6 +141,25 @@ export function createGatewayHarnessProvider(
         }))
     },
     auth: {
+      isCredential: (value): value is VercelCredential => {
+        if (!value || typeof value !== 'object') return false
+        const candidate = value as Record<string, unknown>
+        if (candidate.kind === 'apiKey') {
+          return (
+            typeof candidate.apiKey === 'string' &&
+            candidate.apiKey.length > 0
+          )
+        }
+        return (
+          candidate.kind === 'oauth' &&
+          typeof candidate.accessToken === 'string' &&
+          typeof candidate.expiresAt === 'number' &&
+          (candidate.refreshToken === undefined ||
+            typeof candidate.refreshToken === 'string') &&
+          (candidate.teamId === undefined ||
+            typeof candidate.teamId === 'string')
+        )
+      },
       async login(
         options: GatewayLoginOptions
       ): Promise<VercelCredential> {

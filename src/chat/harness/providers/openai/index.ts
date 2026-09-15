@@ -160,6 +160,17 @@ export function createCodexHarnessProvider(
       return getCodexModels(credential, dependencies.fetch)
     },
     auth: {
+      isCredential: (value): value is CodexCredential => {
+        if (!value || typeof value !== 'object') return false
+        const candidate = value as Record<string, unknown>
+        return (
+          candidate.kind === 'oauth' &&
+          typeof candidate.accessToken === 'string' &&
+          typeof candidate.refreshToken === 'string' &&
+          typeof candidate.expiresAt === 'number' &&
+          typeof candidate.accountId === 'string'
+        )
+      },
       async login(options: CodexLoginOptions) {
         const log = dependencies.log ?? console.log
         const error = dependencies.error ?? console.error

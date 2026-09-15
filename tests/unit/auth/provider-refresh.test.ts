@@ -23,8 +23,10 @@ test('refreshes once under a lock and persists the rotated credential', async ()
   directories.push(directory)
   await writeProviderProfile(
     {
-      version: 2,
+      version: 3,
       activeProvider: 'codex',
+      storagePreference: 'file',
+      credentialBackends: { codex: 'file' },
       credentials: {
         codex: {
           kind: 'oauth',
@@ -79,8 +81,10 @@ test('does not refresh a credential outside the expiry window', async () => {
   directories.push(directory)
   await writeProviderProfile(
     {
-      version: 2,
+      version: 3,
       activeProvider: 'gateway',
+      storagePreference: 'file',
+      credentialBackends: { gateway: 'file' },
       credentials: {
         gateway: {
           kind: 'oauth',

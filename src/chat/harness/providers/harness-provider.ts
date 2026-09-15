@@ -48,6 +48,7 @@ export interface HarnessAuth<
   Strategies extends readonly AuthStrategyName[],
   User = unknown,
 > {
+  isCredential(value: unknown): value is Credential
   login(
     options: HarnessLoginOptions<StrategyFor<Strategies>>
   ): Promise<Credential>

@@ -37,6 +37,7 @@
     "@ai-sdk/gateway": "^4.0.80",
     "@durable-streams/client": "^0.2.7",
     "@inquirer/prompts": "^8.7.2",
+    "@napi-rs/keyring": "2.1.0",
     "@rivet-dev/agentos": "^0.2.19",
     "@rivet-dev/services": "^0.1.7",
     "ai": "^7.0.97",

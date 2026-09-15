@@ -34,6 +34,7 @@ import { removeProductData, uninstallSensos } from './maintenance'
 import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
   clearProviderCredential,
+  persistProviderCredential,
   readProviderProfile,
   readFreshProviderProfile,
   updateProviderProfile,
@@ -112,14 +113,7 @@ async function login(
             strategy: { type: 'oauth-device' },
             signal: controller.signal,
           })
-    await updateProviderProfile(profile => ({
-      ...profile,
-      activeProvider: provider.sensosId,
-      credentials: {
-        ...profile.credentials,
-        [provider.sensosId]: credential,
-      },
-    }))
+    await persistProviderCredential(provider.sensosId, credential)
   } finally {
     process.removeListener('SIGINT', cancel)
   }

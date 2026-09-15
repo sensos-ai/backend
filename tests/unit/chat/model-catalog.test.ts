@@ -14,8 +14,10 @@ import type { ProviderProfile } from '@/auth/profile'
 import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 
 const profile = {
-  version: 2,
+  version: 3,
   activeProvider: 'codex',
+  storagePreference: 'file',
+  credentialBackends: { codex: 'file' },
   credentials: {
     codex: {
       kind: 'oauth',

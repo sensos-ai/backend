@@ -11,27 +11,32 @@ type ReleaseTarget =
 
 const targetPackages: Record<
   ReleaseTarget,
-  { engine: string; services: string; sidecar: string }
+  { engine: string; services: string; sidecar: string; keyring: string }
 > = {
   'darwin-arm64': {
     engine: '@rivetkit/engine-cli-darwin-arm64/rivet-engine',
     services: '@rivet-dev/services-darwin-arm64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-arm64/agentos-sidecar',
+    keyring: '@napi-rs/keyring-darwin-arm64/keyring.darwin-arm64.node',
   },
   'darwin-x64': {
     engine: '@rivetkit/engine-cli-darwin-x64/rivet-engine',
     services: '@rivet-dev/services-darwin-x64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-x64/agentos-sidecar',
+    keyring: '@napi-rs/keyring-darwin-x64/keyring.darwin-x64.node',
   },
   'linux-arm64': {
     engine: '@rivetkit/engine-cli-linux-arm64-musl/rivet-engine',
     services: '@rivet-dev/services-linux-arm64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-arm64-gnu/agentos-sidecar',
+    keyring:
+      '@napi-rs/keyring-linux-arm64-musl/keyring.linux-arm64-musl.node',
   },
   'linux-x64': {
     engine: '@rivetkit/engine-cli-linux-x64-musl/rivet-engine',
     services: '@rivet-dev/services-linux-x64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-x64-gnu/agentos-sidecar',
+    keyring: '@napi-rs/keyring-linux-x64-musl/keyring.linux-x64-musl.node',
   },
 }
 
