@@ -27,17 +27,21 @@ Options:
   -h, --help                  Show help
 
 Providers:
-  login [${authKeyUsage}]        Sign in to a model provider
-  login codex --device        Sign in to Codex with a device code
-  logout [${authKeyUsage}]       Sign out of a model provider
+  auth login [${authKeyUsage}]   Sign in to a model provider
+  auth logout [${authKeyUsage}]  Sign out of a model provider
+  auth credentials config     Configure credential storage
+  login, logout               Shortcuts for auth login and auth logout
   provider <gateway|codex>    Choose the active model provider
   provider info               Show the active provider account
 
 Runtime:
   runtime status|stop
-  uninstall`
+  uninstall
 
-export function isHelpRequest(args: string[]): boolean {
+Global:
+  --agent, --ci               Disable interactive prompts`
+
+export function isHelpRequest(args: readonly string[]): boolean {
   return (
     args[0] === 'help' || args.includes('--help') || args.includes('-h')
   )

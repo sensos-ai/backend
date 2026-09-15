@@ -19,12 +19,10 @@ import {
 import { HELP_TEXT } from './help'
 import { commandArguments } from '@/config/models'
 import {
-  createHarnessAuthRegistry,
   createHarnessProviderRegistry,
   defaultModelRef,
   harnessAuthKeys,
   listModelsForActiveProvider,
-  type HarnessAuthKey,
   type HarnessUser,
   modelRefForProvider,
   type ModelRef,
@@ -33,8 +31,6 @@ import {
 import { removeProductData, uninstallSensos } from './maintenance'
 import { productStateDir, sessionCatalogPath } from '@/config/paths'
 import {
-  clearProviderCredential,
-  persistProviderCredential,
   readProviderProfile,
   readFreshProviderProfile,
   updateProviderProfile,
@@ -58,6 +54,8 @@ import {
   pickLocalSession,
   pickLocalSessions,
 } from './sessions'
+import { runAuthCommand } from './auth'
+import { normalizeCliInvocation } from '../state'
 
 configureDefaultLogger(
   process.env.SENSOS_LOG_LEVEL === 'warn' ? 'warn' : 'silent'
@@ -68,9 +66,7 @@ const createChatId = createIdGeneratorWithPrefix('chat')
 const createIdempotencyId = createIdGeneratorWithPrefix('request')
 const clientId = createClientId()
 const authKeys = harnessAuthKeys(createHarnessProviderRegistry())
-const authKeyUsage = authKeys.join('|')
-const defaultAuthKey = authKeys[0]
-if (!defaultAuthKey) {
+if (!authKeys[0]) {
   throw new Error(
     'No model-provider authentication methods are registered.'
   )
@@ -84,39 +80,6 @@ type ChatOptions = {
   features: HarnessFeatures
   pickSession?: boolean
   createSession?: boolean
-}
-
-function isHarnessAuthKey(value: string): value is HarnessAuthKey {
-  return authKeys.some(authKey => authKey === value)
-}
-
-async function login(
-  authKey: HarnessAuthKey,
-  device = false
-): Promise<void> {
-  const controller = new AbortController()
-  const cancel = () => controller.abort()
-  process.once('SIGINT', cancel)
-  try {
-    const profile = await readProviderProfile()
-    const providers = createHarnessProviderRegistry(profile.credentials)
-    const provider = createHarnessAuthRegistry(providers)[authKey]
-    const credential =
-      provider.authKey === 'codex'
-        ? await provider.auth.login({
-            strategy: {
-              type: device ? 'oauth-device' : 'oauth-pkce',
-            },
-            signal: controller.signal,
-          })
-        : await provider.auth.login({
-            strategy: { type: 'oauth-device' },
-            signal: controller.signal,
-          })
-    await persistProviderCredential(provider.sensosId, credential)
-  } finally {
-    process.removeListener('SIGINT', cancel)
-  }
 }
 
 async function chooseProvider(provider: ModelProvider): Promise<void> {
@@ -177,20 +140,6 @@ async function providerInfo(): Promise<void> {
   if (user.affiliation) {
     console.log(`${user.affiliation.kind}: ${user.affiliation.name}`)
   }
-}
-
-async function logout(authKey: HarnessAuthKey): Promise<void> {
-  const profile = await readProviderProfile()
-  const harness = createHarnessProviderRegistry(profile.credentials)
-  const provider = createHarnessAuthRegistry(harness)[authKey]
-  if (provider.sensosId === 'gateway') {
-    const credential = profile.credentials.gateway
-    if (credential) await provider.auth.logout?.(credential)
-  } else {
-    const credential = profile.credentials.codex
-    if (credential) await provider.auth.logout?.(credential)
-  }
-  await clearProviderCredential(provider.sensosId)
 }
 
 async function runChatSession(
@@ -566,7 +515,17 @@ async function latestSessionId(
 }
 
 async function main(): Promise<void> {
-  const rawArgs = process.argv.slice(2)
+  const invocation = normalizeCliInvocation(process.argv.slice(2), {
+    stdinIsTTY:
+      process.env.SENSOS_CLI_INTERACTIVE === undefined
+        ? process.stdin.isTTY
+        : process.env.SENSOS_CLI_INTERACTIVE === '1',
+    stdoutIsTTY:
+      process.env.SENSOS_CLI_INTERACTIVE === undefined
+        ? process.stdout.isTTY
+        : process.env.SENSOS_CLI_INTERACTIVE === '1',
+  })
+  const rawArgs = invocation.argv
   if (rawArgs[0] === '__runtime-supervisor') {
     const rootIndex = rawArgs.indexOf('--root')
     const root = rootIndex >= 0 ? rawArgs[rootIndex + 1] : undefined
@@ -581,29 +540,10 @@ async function main(): Promise<void> {
     console.log(HELP_TEXT)
     return
   }
-
-  if (command === 'login') {
-    const provider = args[0] ?? defaultAuthKey
-    if (!isHarnessAuthKey(provider)) {
-      throw new Error(`Usage: sensos login [${authKeyUsage}] [--device]`)
-    }
-    const device = args[1] === '--device'
-    if (
-      args.length > (device ? 2 : 1) ||
-      (device && provider !== 'codex')
-    ) {
-      throw new Error(`Usage: sensos login [${authKeyUsage}] [--device]`)
-    }
-    await login(provider, device)
-    return
-  }
-  if (command === 'logout') {
-    const provider = args[0] ?? defaultAuthKey
-    if (!isHarnessAuthKey(provider)) {
-      throw new Error(`Usage: sensos logout [${authKeyUsage}]`)
-    }
-    await logout(provider)
-    console.log(`Signed out of ${provider}.`)
+  if (
+    (command === 'login' || command === 'logout' || command === 'auth') &&
+    (await runAuthCommand(command, args, invocation.state))
+  ) {
     return
   }
   if (command === 'provider') {

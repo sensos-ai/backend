@@ -379,6 +379,12 @@ async function concreteBackend(
     ? resolveAutoBackend(dependencies)
     : preference
 }
+export function resolveCredentialStorageBackend(
+  preference: CredentialStoragePreference,
+  dependencies: CredentialStorageDependencies = {}
+): Promise<CredentialBackend> {
+  return concreteBackend(preference, dependencies)
+}
 async function hydrateKeyringCredentials(
   profile: ProviderProfile,
   dependencies: CredentialStorageDependencies
