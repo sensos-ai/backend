@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: sensos-backend
+    runtime: node
+    repo: https://github.com/sensos-ai/backend
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: bun install --frozen-lockfile --production
+    startCommand: bun run src/render-server.ts
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BUN_VERSION
+        value: 1.4.0
+      - key: SENSOS_LOG_LEVEL
+        value: warn
+      - key: SENSOS_RUNTIME_IDLE_TTL_MS
+        value: "86400000"
+      - key: XDG_CONFIG_HOME
+        value: /tmp/sensos-config
+      - key: XDG_STATE_HOME
+        value: /tmp/sensos-state
+      - key: AI_GATEWAY_API_KEY
+        sync: false

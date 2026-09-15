@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { streamText } from 'hono/streaming'
 import { registry } from './runtime/actors/registry'
+import { RUNTIME_STREAMS_ENDPOINT } from './runtime/constants'
 
 const app = new Hono()
 app.use('*', cors())
@@ -43,5 +44,13 @@ app.get('/', c => {
 
 app.get('/health', c => c.text('OK'))
 app.all('/api/rivet/*', c => registry.handler(c.req.raw))
+app.all('/durable-streams/*', async c => {
+  const source = new URL(c.req.url)
+  const target = new URL(
+    source.pathname + source.search,
+    RUNTIME_STREAMS_ENDPOINT
+  )
+  return fetch(new Request(target, c.req.raw))
+})
 
 export default app

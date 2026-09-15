@@ -3,6 +3,7 @@ import app from './app'
 const port = Number(process.env.PORT ?? 5500)
 
 const server = Bun.serve({
+  hostname: '0.0.0.0',
   development: process.env.NODE_ENV === 'development',
   reusePort: true,
   port,
