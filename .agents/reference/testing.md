@@ -76,15 +76,84 @@ journey with direct calls to its parser, runner, transport, or actor.
 Run the narrowest relevant test while developing, then widen according to the
 boundary changed:
 
+### Unit tests
+
+Run one unit test file directly:
+
 ```sh
-bun test --no-orphans path/to/test.ts
+bun test --no-orphans tests/unit/path/to/example.test.ts
+```
+
+Run every unit test:
+
+```sh
 bun run test:unit
+```
+
+### Rivet integration tests
+
+Rivet integration tests require the repository runner because it starts an
+isolated Rivet Engine and Rivet Services process. Do not invoke files under
+`tests/integration/rivet` directly with `bun test`.
+
+Run one integration test file:
+
+```sh
+bun run test:integration tests/integration/rivet/session/queue.integration.test.ts
+```
+
+Run every integration test:
+
+```sh
 bun run test:integration
+```
+
+The integration runner assigns a temporary `HOME`, `XDG_CONFIG_HOME`, and
+`XDG_STATE_HOME`. Integration tests therefore cannot discover the developer's
+real Sensos profile or Keychain-backed credential metadata. Preserve this
+isolation when modifying the runner. Tests that need provider behavior must use
+the deterministic test model or explicitly injected credentials; real-provider
+credential tests remain opt-in smoke tests.
+
+### CLI end-to-end tests
+
+Build and run every compiled CLI end-to-end test:
+
+```sh
 bun run test:e2e
+```
+
+After a current build exists, run one compiled CLI end-to-end test file:
+
+```sh
+bun run turbo:build
+bun test --no-orphans tests/e2e/cli/session-resume.test.ts
+```
+
+### Validation recipes
+
+Run all test layers through Turbo:
+
+```sh
 bun run turbo:test
+```
+
+Run individual static checks:
+
+```sh
 bun run turbo:typecheck
 bun run turbo:lint
+```
+
+Run the complete validation suite:
+
+```sh
 bun run turbo:check
+```
+
+Check the patch for whitespace errors:
+
+```sh
 git diff --check
 ```
 

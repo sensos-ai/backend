@@ -96,7 +96,9 @@ async function stopProcess(process: Bun.Subprocess | undefined) {
 
 const storageRoot = await mkdtemp(join(tmpdir(), 'sensos-integration-'))
 const controlPlaneRoot = join(storageRoot, 'control-plane')
+const testHome = join(storageRoot, 'home')
 await mkdir(controlPlaneRoot, { recursive: true })
+await mkdir(testHome, { recursive: true })
 
 const probes = [reservePort(), reservePort(), reservePort(), reservePort()]
 const [guardPort, peerPort, metricsPort, streamsPort] = probes.map(
@@ -109,6 +111,11 @@ for (const probe of probes) probe.stop(true)
 
 const env = {
   ...process.env,
+  // Never let integration tests discover the developer's real Sensos
+  // profile or Keychain-backed credential metadata.
+  HOME: testHome,
+  XDG_CONFIG_HOME: join(testHome, '.config'),
+  XDG_STATE_HOME: join(testHome, '.local', 'state'),
   RIVET__GUARD__HOST: HOST,
   RIVET__GUARD__PORT: String(guardPort),
   RIVET__API_PEER__HOST: HOST,
@@ -130,6 +137,7 @@ const env = {
   RIVET_NAMESPACE: 'default',
   SENSOS_USE_TEST_MODEL: '1',
 }
+const testTargets = process.argv.slice(2)
 
 let engine: Bun.Subprocess | undefined
 let services: Bun.Subprocess | undefined
@@ -193,7 +201,13 @@ try {
   await waitForServices(services, streamsEndpoint)
 
   tests = Bun.spawn(
-    ['bun', 'test', '--no-orphans', '--parallel=4', 'tests/integration'],
+    [
+      'bun',
+      'test',
+      '--no-orphans',
+      '--parallel=4',
+      ...(testTargets.length > 0 ? testTargets : ['tests/integration']),
+    ],
     {
       env,
       stdin: 'inherit',
