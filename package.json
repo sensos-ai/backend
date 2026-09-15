@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.80",
+    "@ai-sdk/openai": "^4.0.66",
     "@durable-streams/client": "^0.2.7",
     "@inquirer/prompts": "^8.7.2",
     "@napi-rs/keyring": "2.1.0",
@@ -50,7 +51,6 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
-    "@ai-sdk/openai": "^4.0.66",
     "@biomejs/biome": "^2.5.13",
     "@modelcontextprotocol/client": "2.0.0",
     "@types/bun": "^1.4.0",
