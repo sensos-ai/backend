@@ -16,7 +16,7 @@ import { readProviderProfileSync } from '@/auth/profile'
 import { DEFAULT_AGENT_INSTRUCTIONS } from './constants'
 import { resolveHarnessFeatures, type HarnessFeatures } from './features'
 import type { Sandbox } from './sandbox'
-import { sandboxTools } from './tools/sandbox'
+import { tools } from './tools/registry'
 import { startAIEventLogListener } from '@/shared/events'
 import {
   appendSteeringMessages,
@@ -41,9 +41,6 @@ export interface CreateHarnessOptions {
 
 export async function createHarness(options: CreateHarnessOptions) {
   const features = resolveHarnessFeatures(options.features)
-  const tools = {
-    ...sandboxTools,
-  }
 
   const toolsContext = { sandbox: options.sandbox }
 
@@ -63,7 +60,7 @@ export async function createHarness(options: CreateHarnessOptions) {
   const agent = new ToolLoopAgent({
     model: wrapLanguageModel({ model, middleware: loggingMiddleware }),
     instructions: options.instructions ?? DEFAULT_AGENT_INSTRUCTIONS,
-    tools,
+    tools: tools.toolset(),
     toolsContext: {
       read: toolsContext,
       write: toolsContext,

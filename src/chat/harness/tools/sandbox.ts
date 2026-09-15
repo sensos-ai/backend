@@ -6,7 +6,6 @@ import { z } from 'zod'
 
 const toolContext = z.object({
   sandbox: z.custom<Sandbox>(),
-  // needsApproval: z.custom<NeedsApproval>(),
 })
 
 const readTool = tool({
