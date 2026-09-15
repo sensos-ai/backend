@@ -14,7 +14,10 @@ import {
   type HarnessLoginOptions,
   type HarnessModel,
 } from '../harness-provider'
-import { openBrowser } from '../auth-interaction'
+import {
+  openBrowser,
+  type HarnessAuthInteraction,
+} from '../auth-interaction'
 import {
   beginVercelLogin,
   completeVercelLogin,
@@ -86,9 +89,9 @@ export const aiGateway = (
 ) => {
   return createGateway({
     apiKey:
-      (credential?.kind === 'oauth'
+      credential?.kind === 'oauth'
         ? credential.accessToken
-        : credential?.apiKey) ?? process.env.AI_GATEWAY_API_KEY,
+        : credential?.apiKey,
     ...(credential?.kind === 'oauth' && credential.teamId
       ? { teamIdOrSlug: credential.teamId }
       : {}),
@@ -111,6 +114,9 @@ export function createGatewayHarnessProvider(
     ) => Promise<string>
     log?: (message: string) => void
     error?: (message: string) => void
+    env?: Record<string, string | undefined>
+    interaction?: HarnessAuthInteraction
+    sleep?: (milliseconds: number) => Promise<void>
   } = {}
 ) {
   const provider =
@@ -164,13 +170,27 @@ export function createGatewayHarnessProvider(
         options: GatewayLoginOptions
       ): Promise<VercelCredential> {
         if (options.strategy.type === 'apiKey') {
-          throw new Error('API-key login is not implemented yet.')
+          const apiKey =
+            options.strategy.apiKey ??
+            (dependencies.env ?? process.env).AI_GATEWAY_API_KEY
+          if (!apiKey?.trim()) {
+            throw new Error(
+              'Missing API key. Pass `--apiKey <token>` or set AI_GATEWAY_API_KEY.'
+            )
+          }
+          return { kind: 'apiKey', apiKey }
         }
-        const log = dependencies.log ?? console.log
-        const error = dependencies.error ?? console.error
-        const openUrl = dependencies.openUrl ?? openBrowser
+        const interaction = dependencies.interaction
+        const log = interaction?.log ?? dependencies.log ?? console.log
+        const error =
+          interaction?.error ?? dependencies.error ?? console.error
+        const openUrl =
+          interaction?.openUrl ?? dependencies.openUrl ?? openBrowser
         log('Opening Vercel AI Gateway sign-in in your browser.')
-        const device = await beginVercelLogin(options.signal)
+        const device = await beginVercelLogin(
+          options.signal,
+          dependencies.fetch
+        )
         log(
           `Open this URL to connect Vercel AI Gateway:\n${device.verification_uri_complete}`
         )
@@ -181,26 +201,51 @@ export function createGatewayHarnessProvider(
         }
         const oauthCredential = await completeVercelLogin(
           device,
-          options.signal
+          options.signal,
+          dependencies.fetch,
+          dependencies.sleep
         )
         const teams = await listVercelTeams(
           oauthCredential.accessToken,
-          options.signal
+          options.signal,
+          dependencies.fetch
         )
         if (teams.length === 0) {
           throw new Error(
             'No Vercel teams are available. Sensos requires a team-scoped AI Gateway account.'
           )
         }
-        const teamId = dependencies.selectTeam
-          ? await dependencies.selectTeam(teams)
-          : await select({
+        let teamId: string
+        const onlyTeam = teams.length === 1 ? teams[0] : undefined
+        if (onlyTeam) {
+          teamId = onlyTeam.id
+        } else if (interaction?.isInteractive === false) {
+          throw new Error(
+            'Multiple Vercel teams are available. Run `sensos login vercel` interactively to choose one.'
+          )
+        } else if (dependencies.selectTeam) {
+          teamId = await dependencies.selectTeam(teams)
+        } else if (interaction) {
+          teamId = await interaction.select({
+            message: 'Choose the Vercel scope for AI Gateway',
+            choices: teams.map(team => ({
+              name: team.name,
+              value: team.id,
+            })),
+            signal: options.signal,
+          })
+        } else {
+          teamId = await select(
+            {
               message: 'Choose the Vercel scope for AI Gateway',
               choices: teams.map(team => ({
                 name: team.name,
                 value: team.id,
               })),
-            })
+            },
+            { signal: options.signal }
+          )
+        }
         log('Connected to Vercel AI Gateway.')
         return { ...oauthCredential, teamId, kind: 'oauth' }
       },
@@ -210,6 +255,7 @@ export function createGatewayHarnessProvider(
         Promise.resolve(
           value.kind === 'oauth' ? value.accessToken : value.apiKey
         ),
+      logout: () => Promise.resolve(),
       refresh: async value => ({
         ...(await refreshVercelCredential(value, dependencies.fetch)),
         ...(value.teamId ? { teamId: value.teamId } : {}),

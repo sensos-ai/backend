@@ -128,9 +128,12 @@ export async function getVercelUser(
   }
 }
 
-export async function beginVercelLogin(signal?: AbortSignal) {
-  const server = await authorizationServer(signal)
-  const response = await fetch(server.device_authorization_endpoint, {
+export async function beginVercelLogin(
+  signal?: AbortSignal,
+  fetchImpl: OAuthFetch = fetch
+) {
+  const server = await authorizationServer(signal, fetchImpl)
+  const response = await fetchImpl(server.device_authorization_endpoint, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
@@ -163,13 +166,15 @@ export async function beginVercelLogin(signal?: AbortSignal) {
 
 export async function completeVercelLogin(
   device: DeviceAuthorization,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fetchImpl: OAuthFetch = fetch,
+  sleep: (milliseconds: number) => Promise<void> = Bun.sleep
 ): Promise<VercelOAuthCredential> {
-  const server = await authorizationServer(signal)
+  const server = await authorizationServer(signal, fetchImpl)
   const deadline = Date.now() + device.expires_in * 1000
   let delay = device.interval * 1000
   while (Date.now() < deadline) {
-    const response = await fetch(server.token_endpoint, {
+    const response = await fetchImpl(server.token_endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -199,12 +204,12 @@ export async function completeVercelLogin(
       }
     }
     if (value.error === 'authorization_pending') {
-      await Bun.sleep(delay)
+      await sleep(delay)
       continue
     }
     if (value.error === 'slow_down') {
       delay += 5_000
-      await Bun.sleep(delay)
+      await sleep(delay)
       continue
     }
     throw new Error(
@@ -255,9 +260,10 @@ export async function refreshVercelCredential(
 
 export async function listVercelTeams(
   accessToken: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fetchImpl: OAuthFetch = fetch
 ): Promise<VercelTeam[]> {
-  const response = await fetch(TEAMS_URL, {
+  const response = await fetchImpl(TEAMS_URL, {
     headers: {
       authorization: `Bearer ${accessToken}`,
       'user-agent': userAgent(),

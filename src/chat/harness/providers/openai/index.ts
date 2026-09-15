@@ -14,7 +14,10 @@ import {
   type HarnessLoginOptions,
   type HarnessModel,
 } from '../harness-provider'
-import { openBrowser } from '../auth-interaction'
+import {
+  openBrowser,
+  type HarnessAuthInteraction,
+} from '../auth-interaction'
 
 export type CodexModelId = `gpt-${string}` | (string & {})
 
@@ -117,7 +120,7 @@ export type OpenaiCreateOptions = {
 export const codex = (config?: OpenaiCreateOptions) =>
   createOpenAI({
     name: 'codex',
-    apiKey: config?.apiKey ?? '',
+    apiKey: config?.apiKey,
     baseURL: 'https://chatgpt.com/backend-api/codex',
     headers: {
       ...(config?.accountId
@@ -136,6 +139,9 @@ export function createCodexHarnessProvider(
     openUrl?: (url: string) => Promise<void>
     log?: (message: string) => void
     error?: (message: string) => void
+    interaction?: Pick<HarnessAuthInteraction, 'openUrl' | 'log' | 'error'>
+    loginWithPkce?: typeof loginWithCodex
+    loginWithDevice?: typeof loginWithCodexDevice
   } = {}
 ) {
   const provider = codex({
@@ -172,9 +178,16 @@ export function createCodexHarnessProvider(
         )
       },
       async login(options: CodexLoginOptions) {
-        const log = dependencies.log ?? console.log
-        const error = dependencies.error ?? console.error
-        const openUrl = dependencies.openUrl ?? openBrowser
+        const log =
+          dependencies.interaction?.log ?? dependencies.log ?? console.log
+        const error =
+          dependencies.interaction?.error ??
+          dependencies.error ??
+          console.error
+        const openUrl =
+          dependencies.interaction?.openUrl ??
+          dependencies.openUrl ??
+          openBrowser
         log(
           options.strategy.type === 'oauth-device'
             ? 'Starting OpenAI Codex device sign-in.'
@@ -182,26 +195,40 @@ export function createCodexHarnessProvider(
         )
         const credential =
           options.strategy.type === 'oauth-device'
-            ? await loginWithCodexDevice({
-                onDeviceCode: async (verificationUrl, userCode) => {
-                  log(`Open this URL to sign in:\n${verificationUrl}`)
-                  log(`Enter this one-time code:\n${userCode}`)
+            ? await (dependencies.loginWithDevice ?? loginWithCodexDevice)(
+                {
+                  onDeviceCode: async (verificationUrl, userCode) => {
+                    log(`Open this URL to sign in:\n${verificationUrl}`)
+                    log(`Enter this one-time code:\n${userCode}`)
+                    log('Never share this one-time code with anyone.')
+                    try {
+                      await openUrl(verificationUrl)
+                    } catch {
+                      error('Could not open a browser. Use the URL above.')
+                    }
+                    log('Waiting for sign-in...')
+                  },
+                  signal: options.signal,
+                }
+              )
+            : await (dependencies.loginWithPkce ?? loginWithCodex)(
+                async url => {
                   try {
-                    await openUrl(verificationUrl)
+                    await openUrl(url)
                   } catch {
-                    error('Could not open a browser. Use the URL above.')
+                    error('Could not open a browser. Use this URL:')
+                    log(url)
                   }
-                  log('Waiting for sign-in...')
                 },
-                signal: options.signal,
-              })
-            : await loginWithCodex(openUrl, options.signal)
+                options.signal
+              )
         log('Connected to OpenAI Codex.')
         return { ...credential, kind: 'oauth' as const }
       },
       needsRefresh: (value): value is CodexCredential =>
         value.expiresAt <= Date.now() + 60_000,
       token: value => Promise.resolve(value.accessToken),
+      logout: () => Promise.resolve(),
       refresh: async value => ({
         ...(await refreshCodexCredential(value, dependencies.fetch)),
         kind: 'oauth',
@@ -214,5 +241,5 @@ export function createCodexHarnessProvider(
 export const openai = (config?: OpenaiCreateOptions) =>
   createOpenAI({
     name: 'openai',
-    apiKey: config?.apiKey ?? '',
+    apiKey: config?.apiKey,
   })

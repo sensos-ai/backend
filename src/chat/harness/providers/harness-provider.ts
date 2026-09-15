@@ -144,7 +144,6 @@ export class SensosHarnessProvider<
     this.apiKeyEnvironmentVariable = options.apiKeyEnvironmentVariable
     this.provider = options.provider
     this.defaultModelId = options.defaultModelId
-    this.auth = options.auth
     this.fetchModels = options.listModels
     const strategies = new Set(options.supportedAuthStrategies)
     if (strategies.size !== options.supportedAuthStrategies.length) {
@@ -161,6 +160,17 @@ export class SensosHarnessProvider<
       throw new Error(
         `${options.displayName} must declare an API-key environment variable.`
       )
+    }
+    this.auth = {
+      ...options.auth,
+      login: async loginOptions => {
+        if (!strategies.has(loginOptions.strategy.type)) {
+          throw new Error(
+            `${options.displayName} does not support this login strategy, available methods are: ${options.supportedAuthStrategies.join(', ')}`
+          )
+        }
+        return await options.auth.login(loginOptions)
+      },
     }
   }
 
