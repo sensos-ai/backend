@@ -388,24 +388,29 @@ export function resolveCredentialStorageBackend(
 ): Promise<CredentialBackend> {
   return concreteBackend(preference, dependencies)
 }
-async function hydrateKeyringCredentials(
+async function hydrateKeyringCredential(
   profile: ProviderProfile,
+  provider: ModelProvider,
   dependencies: CredentialStorageDependencies
 ): Promise<void> {
+  if (profile.credentialBackends[provider] !== 'keyring') return
   const store = createKeyringCredentialStore(dependencies)
-  for (const provider of ['gateway', 'codex'] as const) {
-    if (profile.credentialBackends[provider] !== 'keyring') continue
-    const credential = await store.read(provider)
-    if (credential === undefined) throw invalidCredentials()
-    profile.credentials[provider] = credential as never
-  }
+  const credential = await store.read(provider)
+  if (credential === undefined) throw invalidCredentials()
+  profile.credentials[provider] = credential as never
 }
 export async function readProviderProfile(
+  directory = productConfigDir()
+): Promise<ProviderProfile> {
+  return readProfileDocument(directory)
+}
+export async function readProviderProfileWithCredential(
+  provider: ModelProvider,
   directory = productConfigDir(),
   dependencies: CredentialStorageDependencies = {}
 ): Promise<ProviderProfile> {
-  const profile = await readProfileDocument(directory)
-  await hydrateKeyringCredentials(profile, dependencies)
+  const profile = await readProviderProfile(directory)
+  await hydrateKeyringCredential(profile, provider, dependencies)
   return profile
 }
 export function readProviderProfileSync(
@@ -466,13 +471,10 @@ export async function withCredentialLock<T>(
 }
 export async function updateProviderProfile(
   update: (current: ProviderProfile) => ProviderProfile,
-  directory = productConfigDir(),
-  dependencies: CredentialStorageDependencies = {}
+  directory = productConfigDir()
 ): Promise<ProviderProfile> {
   return withCredentialLock(async () => {
-    const profile = update(
-      await readProviderProfile(directory, dependencies)
-    )
+    const profile = update(await readProviderProfile(directory))
     for (const provider of ['gateway', 'codex'] as const) {
       if (profile.credentials[provider])
         profile.credentialBackends[provider] ??= 'file'
@@ -488,7 +490,7 @@ export async function persistProviderCredential(
   dependencies: CredentialStorageDependencies = {}
 ): Promise<ProviderProfile> {
   return withCredentialLock(async () => {
-    const profile = await readProviderProfile(directory, dependencies)
+    const profile = await readProviderProfile(directory)
     const backend = await concreteBackend(
       profile.storagePreference,
       dependencies
@@ -516,7 +518,9 @@ export async function configureCredentialStorage(
   dependencies: CredentialStorageDependencies = {}
 ): Promise<ProviderProfile> {
   return withCredentialLock(async () => {
-    const profile = await readProviderProfile(directory, dependencies)
+    const profile = await readProviderProfile(directory)
+    for (const provider of ['gateway', 'codex'] as const)
+      await hydrateKeyringCredential(profile, provider, dependencies)
     const destinationBackend = await concreteBackend(
       preference,
       dependencies
@@ -574,8 +578,13 @@ export async function readFreshProviderProfile(
   dependencies: ProviderDependencies = {},
   storageDependencies: CredentialStorageDependencies = {}
 ): Promise<ProviderProfile> {
-  const initial = await readProviderProfile(directory, storageDependencies)
-  const providerId = provider ?? initial.activeProvider
+  const metadata = await readProviderProfile(directory)
+  const providerId = provider ?? metadata.activeProvider
+  const initial = await readProviderProfileWithCredential(
+    providerId,
+    directory,
+    storageDependencies
+  )
   const credential = initial.credentials[providerId]
   const initialAuth = createHarnessProviderRegistry(
     initial.credentials,
@@ -584,7 +593,8 @@ export async function readFreshProviderProfile(
   if (!credential || !initialAuth.needsRefresh(credential as never))
     return initial
   return withCredentialLock(async () => {
-    const current = await readProviderProfile(
+    const current = await readProviderProfileWithCredential(
+      providerId,
       directory,
       storageDependencies
     )
@@ -618,7 +628,7 @@ export async function clearProviderCredential(
   dependencies: CredentialStorageDependencies = {}
 ): Promise<void> {
   await withCredentialLock(async () => {
-    const profile = await readProviderProfile(directory, dependencies)
+    const profile = await readProviderProfile(directory)
     if (profile.credentialBackends[provider] === 'keyring')
       await createKeyringCredentialStore(dependencies).delete(provider)
     delete profile.credentials[provider]

@@ -13,6 +13,7 @@ import {
   type ModelRef,
 } from './providers'
 import { readProviderProfileSync } from '@/auth/profile'
+import { createTestLanguageModel } from './providers/test-model'
 import { DEFAULT_AGENT_INSTRUCTIONS } from './constants'
 import { resolveHarnessFeatures, type HarnessFeatures } from './features'
 import type { Sandbox } from './sandbox'
@@ -44,17 +45,20 @@ export async function createHarness(options: CreateHarnessOptions) {
 
   const toolsContext = { sandbox: options.sandbox }
 
-  const providers = options.languageModel
-    ? undefined
-    : await providerRegistry({}, options.model?.provider)
+  const providers =
+    options.languageModel || features.useMockModel
+      ? undefined
+      : await providerRegistry({}, options.model?.provider)
   const resolved = providers?.resolveModel(options.model)
   const resolvedProvider =
     options.model?.provider ??
     resolved?.provider ??
-    readProviderProfileSync().activeProvider
+    (features.useMockModel
+      ? 'gateway'
+      : readProviderProfileSync().activeProvider)
   const model =
     options.languageModel ??
-    (features.useMockModel ? providers?.testModel : resolved?.model)
+    (features.useMockModel ? createTestLanguageModel() : resolved?.model)
   if (!model) throw new Error('Could not resolve a language model.')
 
   const agent = new ToolLoopAgent({

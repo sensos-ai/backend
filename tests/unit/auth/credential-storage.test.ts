@@ -8,6 +8,7 @@ import {
   persistProviderCredential,
   providerProfilePath,
   readProviderProfile,
+  readProviderProfileWithCredential,
   type CredentialStorageDependencies,
   type KeyringEntry,
 } from '@/auth/profile'
@@ -70,8 +71,13 @@ describe('credential storage', () => {
         credentials: {},
       })
       expect(
-        (await readProviderProfile(directory, dependencies)).credentials
-          .gateway
+        (
+          await readProviderProfileWithCredential(
+            'gateway',
+            directory,
+            dependencies
+          )
+        ).credentials.gateway
       ).toEqual(apiKeyCredential)
     })
   })
@@ -135,8 +141,13 @@ describe('credential storage', () => {
       )
       expect(document).not.toContain('secret-key')
       expect(
-        (await readProviderProfile(directory, dependencies)).credentials
-          .gateway
+        (
+          await readProviderProfileWithCredential(
+            'gateway',
+            directory,
+            dependencies
+          )
+        ).credentials.gateway
       ).toEqual(apiKeyCredential)
     })
   })
@@ -170,8 +181,13 @@ describe('credential storage', () => {
 
       expect(migrated.credentialBackends.gateway).toBe('keyring')
       expect(
-        (await readProviderProfile(directory, dependencies)).credentials
-          .gateway
+        (
+          await readProviderProfileWithCredential(
+            'gateway',
+            directory,
+            dependencies
+          )
+        ).credentials.gateway
       ).toEqual(apiKeyCredential)
     })
   })
@@ -195,8 +211,73 @@ describe('credential storage', () => {
         })
       )
       await expect(
-        readProviderProfile(directory, fakeKeyring(values))
+        readProviderProfileWithCredential(
+          'gateway',
+          directory,
+          fakeKeyring(values)
+        )
       ).rejects.toBeInstanceOf(CredentialStorageError)
+    })
+  })
+
+  test('loads only the requested keyring credential', async () => {
+    await withDirectory(async directory => {
+      const reads: string[] = []
+      const values = new Map([
+        [
+          'provider:gateway:v1',
+          JSON.stringify({ version: 1, credential: apiKeyCredential }),
+        ],
+        [
+          'provider:codex:v1',
+          JSON.stringify({
+            version: 1,
+            credential: {
+              kind: 'oauth',
+              accessToken: 'access',
+              refreshToken: 'refresh',
+              expiresAt: Date.now() + 60_000,
+              accountId: 'account',
+            },
+          }),
+        ],
+      ])
+      await writeFile(
+        providerProfilePath(directory),
+        JSON.stringify({
+          version: 3,
+          activeProvider: 'gateway',
+          storagePreference: 'keyring',
+          credentialBackends: {
+            gateway: 'keyring',
+            codex: 'keyring',
+          },
+          credentials: {},
+        })
+      )
+      const dependencies: CredentialStorageDependencies = {
+        createKeyringEntry: (_service, account) => ({
+          getPassword: async () => {
+            reads.push(account)
+            return values.get(account)
+          },
+          setPassword: async () => undefined,
+          deleteCredential: async () => false,
+        }),
+      }
+
+      const metadata = await readProviderProfile(directory)
+      expect(metadata.credentials).toEqual({})
+      expect(reads).toEqual([])
+
+      const profile = await readProviderProfileWithCredential(
+        'gateway',
+        directory,
+        dependencies
+      )
+      expect(profile.credentials.gateway).toEqual(apiKeyCredential)
+      expect(profile.credentials.codex).toBeUndefined()
+      expect(reads).toEqual(['provider:gateway:v1'])
     })
   })
 })

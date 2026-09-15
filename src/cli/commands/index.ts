@@ -88,11 +88,16 @@ async function chooseProvider(provider: ModelProvider): Promise<void> {
   if (
     provider === 'gateway' &&
     !profile.credentials.gateway &&
+    profile.credentialBackends.gateway !== 'keyring' &&
     !process.env.AI_GATEWAY_API_KEY
   ) {
     throw new Error('Gateway is not connected. Run `sensos login` first.')
   }
-  if (provider === 'codex' && !profile.credentials.codex) {
+  if (
+    provider === 'codex' &&
+    !profile.credentials.codex &&
+    profile.credentialBackends.codex !== 'keyring'
+  ) {
     throw new Error(
       'Codex is not connected. Run `sensos login codex` first.'
     )
