@@ -141,6 +141,41 @@ describe('credential storage', () => {
     })
   })
 
+  test('treats a native null keyring result as a missing credential', async () => {
+    await withDirectory(async directory => {
+      await writeFile(
+        providerProfilePath(directory),
+        JSON.stringify({
+          version: 2,
+          activeProvider: 'gateway',
+          credentials: { gateway: apiKeyCredential },
+        })
+      )
+      const values = new Map<string, string>()
+      const dependencies: CredentialStorageDependencies = {
+        createKeyringEntry: (_service, account) => ({
+          getPassword: async () => values.get(account) ?? null,
+          setPassword: async value => {
+            values.set(account, value)
+          },
+          deleteCredential: async () => values.delete(account),
+        }),
+      }
+
+      const migrated = await configureCredentialStorage(
+        'auto',
+        directory,
+        dependencies
+      )
+
+      expect(migrated.credentialBackends.gateway).toBe('keyring')
+      expect(
+        (await readProviderProfile(directory, dependencies)).credentials
+          .gateway
+      ).toEqual(apiKeyCredential)
+    })
+  })
+
   test('rejects corrupt keyring values instead of treating them as absent', async () => {
     await withDirectory(async directory => {
       const values = new Map([

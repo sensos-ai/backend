@@ -40,10 +40,13 @@ export interface CredentialStore {
   write(provider: ModelProvider, credential: unknown): Promise<void>
   delete(provider: ModelProvider): Promise<void>
 }
-export type KeyringEntry = Pick<
-  AsyncEntry,
-  'getPassword' | 'setPassword' | 'deleteCredential'
->
+export type KeyringEntry = Omit<
+  Pick<AsyncEntry, 'getPassword' | 'setPassword' | 'deleteCredential'>,
+  'getPassword'
+> & {
+  /** Native keyring implementations may return null for a missing entry. */
+  getPassword(): Promise<string | null | undefined>
+}
 export type CredentialStorageDependencies = {
   createKeyringEntry?: (
     service: string,
@@ -271,13 +274,13 @@ export function createKeyringCredentialStore(
   return {
     backend: 'keyring',
     async read(provider) {
-      let encoded: string | undefined
+      let encoded: string | null | undefined
       try {
         encoded = await entry(provider).getPassword()
       } catch (error) {
         throw classifyKeyringError(error)
       }
-      if (encoded === undefined) return undefined
+      if (encoded == null) return undefined
       try {
         const envelope = JSON.parse(encoded) as {
           version?: unknown
