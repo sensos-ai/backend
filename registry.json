@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "sensos-backend",
+  "homepage": "https://github.com/sensos-ai/backend",
+  "include": ["registry/protocol/registry.json"],
+  "items": [
+    {
+      "name": "protocol",
+      "type": "registry:item",
+      "title": "Sensos engine protocol",
+      "description": "The complete portable contract shared by Sensos engine hosts and controller clients.",
+      "registryDependencies": [
+        "sensos-ai/backend/protocol-core",
+        "sensos-ai/backend/protocol-models",
+        "sensos-ai/backend/protocol-session",
+        "sensos-ai/backend/protocol-streams"
+      ],
+      "files": []
+    }
+  ]
+}
