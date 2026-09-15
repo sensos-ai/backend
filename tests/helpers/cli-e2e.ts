@@ -25,7 +25,13 @@ const engineExecutable = resolve('dist/sensos-engine')
 async function reserveRuntimePort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const candidate = 10_000 + Math.floor(Math.random() * 40_000)
-    const ports = [candidate, candidate + 1, candidate + 2, candidate + 10]
+    const ports = [
+      candidate,
+      candidate + 1,
+      candidate + 2,
+      candidate + 10,
+      candidate + 20,
+    ]
     const servers = ports.map(() => createServer())
     try {
       await Promise.all(
@@ -164,6 +170,7 @@ export async function startCliE2E(
     ? await bindRuntimePorts(port)
     : []
   const endpoint = `http://127.0.0.1:${port}`
+  const publicEndpoint = `http://127.0.0.1:${port + 20}`
   const {
     BUN_FEATURE_FLAG_NO_ORPHANS: _testRunnerOrphanPolicy,
     ...runtimeEnvironment
@@ -191,12 +198,13 @@ export async function startCliE2E(
     TERM: 'xterm-256color',
     ...(options.remoteEngine
       ? {
-          SENSOS_REGISTRY_ENDPOINT: endpoint,
-          SENSOS_STREAMS_URL: `http://127.0.0.1:${port + 2}`,
+          SENSOS_REGISTRY_ENDPOINT: `${publicEndpoint}/api/rivet`,
+          SENSOS_STREAMS_URL: publicEndpoint,
         }
       : {}),
   }
   let remoteRuntime: Bun.Subprocess | undefined
+  let publicGateway: Bun.Subprocess | undefined
   if (options.remoteEngine) {
     remoteRuntime = Bun.spawn(
       [
@@ -227,6 +235,26 @@ export async function startCliE2E(
       },
       value => value === 'ready',
       { description: 'external Rivet runtime', timeoutMs: 20_000 }
+    )
+    publicGateway = Bun.spawn(['bun', 'run', 'src/server.ts'], {
+      env: { ...env, PORT: String(port + 20) },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'inherit',
+    })
+    await waitForValue(
+      async () => {
+        if (publicGateway?.exitCode !== null)
+          return `exited:${publicGateway?.exitCode}`
+        try {
+          const response = await fetch(`${publicEndpoint}/health`)
+          return response.ok ? 'ready' : `status:${response.status}`
+        } catch {
+          return 'waiting'
+        }
+      },
+      value => value === 'ready',
+      { description: 'public Rivet gateway', timeoutMs: 10_000 }
     )
   }
   let output = ''
@@ -439,6 +467,13 @@ export async function startCliE2E(
         stderr: 'ignore',
       })
       await Promise.race([runtimeStop.exited, Bun.sleep(8_000)])
+      if (publicGateway?.exitCode === null) {
+        publicGateway?.kill('SIGTERM')
+        await Promise.race([
+          publicGateway?.exited ?? Promise.resolve(),
+          Bun.sleep(3_000),
+        ])
+      }
       if (remoteRuntime?.exitCode === null) {
         remoteRuntime.kill('SIGTERM')
         await Promise.race([remoteRuntime.exited, Bun.sleep(3_000)])
