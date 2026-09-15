@@ -1,24 +1,12 @@
 import type { UIMessage } from 'ai'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
-import {
-  configuredSessionCatalog,
-  updateCatalogTitle,
-} from '@/storage/session-catalog'
+import { configuredSessionCatalog } from '@/storage/session-catalog'
 import {
   toChatStatus,
   type InboxMessage,
   type RunCompletion,
 } from '../../config'
-import {
-  listMessages,
-  setSessionTitle,
-  submitRun as submitRunToDatabase,
-} from '../../db'
-import {
-  generateSessionTitle,
-  shouldGenerateSessionTitle,
-  userMessageText,
-} from '../../title'
+import { listMessages, submitRun as submitRunToDatabase } from '../../db'
 import type { NextWork, SessionWorkflowContext } from '../types'
 import {
   releaseRuntimeActivity,
@@ -83,48 +71,6 @@ export async function submitRun(
     if (result.created) {
       const catalog = configuredSessionCatalog()
       if (catalog) step.waitUntil(catalog.touch(step.state.sessionId))
-      if (
-        shouldGenerateSessionTitle({
-          created: true,
-          revision: result.revision,
-          title: step.state.title,
-        })
-      ) {
-        const prompt = userMessageText(queued.body.message)
-        if (prompt) {
-          const state = step.state
-          const database = step.db
-          const log = step.log
-          step.waitUntil(
-            (async () => {
-              const title = await generateSessionTitle(prompt, {
-                features: state.config.features,
-                provider: queued.body.model?.provider,
-              })
-              if (!title || state.title) return
-              const session = catalog
-                ? await updateCatalogTitle(
-                    catalog,
-                    state.sessionId,
-                    state.catalogRevision,
-                    title
-                  )
-                : undefined
-              state.title = session?.title ?? title
-              if (session) state.catalogRevision = session.revision
-              await setSessionTitle(database, state.title)
-              step.broadcast('titleChanged', { title: state.title })
-            })().catch(error => {
-              log.warn({
-                msg: 'session title generation failed',
-                error:
-                  error instanceof Error ? error.message : String(error),
-              })
-            })
-          )
-        }
-      }
-
       const messages = await listMessages(step.db)
       await projectTranscript(
         step.state.sessionId,

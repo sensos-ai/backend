@@ -110,6 +110,41 @@ test('run submission persists once and deduplicates retries', async () => {
   ).toHaveLength(1)
 }, 20_000)
 
+test('first run generates and broadcasts the session title', async () => {
+  const { client, actorKey, trackedActorKey, cleanup } =
+    await createSessionTest('session title broadcast')
+  const connection = client.session
+    .getOrCreate([trackedActorKey('session')], {
+      createWithInput: {
+        cwd: process.cwd(),
+        features: { useMockModel: true },
+      },
+    })
+    .connect({ clientId: actorKey('client') })
+  cleanup(() => connection.dispose())
+
+  const titleChanged = waitForEvent<{ title: string }>(
+    listener => connection.on('titleChanged', listener),
+    event => event.title.length > 0,
+    { description: 'generated session title to be broadcast' }
+  )
+  const message = inbox(
+    'adaptive',
+    'verify session title broadcasts inside its workflow step'
+  )
+  await connection.deliver(message)
+
+  const title = (await titleChanged).title
+  expect(title).toBe(
+    'verify session title broadcasts inside its workflow step'
+  )
+  await waitForValue(
+    () => connection.getSession(),
+    session => session.title === title,
+    { description: 'generated session title to persist' }
+  )
+}, 20_000)
+
 test('now delivery interrupts the active run and starts a successor', async () => {
   const { client, actorKey, trackedActorKey, cleanup } =
     await createSessionTest('now actor delivery')

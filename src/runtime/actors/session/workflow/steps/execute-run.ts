@@ -15,15 +15,18 @@ import {
 } from '@/chat/harness'
 import { createIdGeneratorWithPrefix, errorMessage } from '@/shared/utils'
 import { configuredSessionCatalog } from '@/storage/session-catalog'
+import { updateCatalogTitle } from '@/storage/session-catalog'
 import {
   appendRunFrame,
   finalizeRun,
   getRun,
   listMessages,
+  setSessionTitle,
   type RunStepMetadata,
   updateRun,
 } from '../../db'
 import { toChatStatus } from '../../config'
+import { generateSessionTitle, userMessageText } from '../../title'
 import {
   cutoffAssistantMessage,
   hasAssistantContent,
@@ -228,6 +231,38 @@ export async function executeRun(
       let responseMessage: UIMessage | undefined
       let streamedResponseMessage: UIMessage | undefined
 
+      const generateMissingTitle = async () => {
+        const prompt = userMessageText(input.command.message)
+        if (!prompt || step.state.title) return
+
+        try {
+          const title = await generateSessionTitle(prompt, {
+            features: step.state.config.features,
+            provider: input.command.model?.provider,
+          })
+          if (!title || step.state.title) return
+
+          const catalog = configuredSessionCatalog()
+          const session = catalog
+            ? await updateCatalogTitle(
+                catalog,
+                step.state.sessionId,
+                step.state.catalogRevision,
+                title
+              )
+            : undefined
+          step.state.title = session?.title ?? title
+          if (session) step.state.catalogRevision = session.revision
+          await setSessionTitle(step.db, step.state.title)
+          step.broadcast('titleChanged', { title: step.state.title })
+        } catch (error) {
+          step.log.warn({
+            msg: 'session title generation failed',
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
       async function consumeRunStream() {
         const messages = await listMessages(step.db)
         const sandbox = createAgentOsSandbox({
@@ -331,8 +366,8 @@ export async function executeRun(
         })
         publishStatus('running')
 
-        const { responseMessage, stepMetadata, endState } =
-          await consumeRunStream()
+        const [{ responseMessage, stepMetadata, endState }] =
+          await Promise.all([consumeRunStream(), generateMissingTitle()])
 
         acceptingInterrupts = false
 
