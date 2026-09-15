@@ -16,6 +16,11 @@ export interface HarnessUser {
   }
 }
 
+export type HarnessLoginOptions = {
+  device?: boolean
+  signal?: AbortSignal
+}
+
 export type OptionalArgument<T> = [T] extends [undefined]
   ? []
   : [options: T]

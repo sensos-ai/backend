@@ -1,5 +1,4 @@
 import { confirm, select } from '@inquirer/prompts'
-import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { createClient, type ActorConn } from 'rivetkit/client'
 import { configureDefaultLogger } from 'rivetkit/log'
@@ -86,23 +85,6 @@ type ChatOptions = {
   createSession?: boolean
 }
 
-function openBrowser(url: string): Promise<void> {
-  const [command, args] =
-    process.platform === 'darwin'
-      ? ['open', [url]]
-      : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore' })
-    child.once('error', reject)
-    child.once('spawn', () => {
-      child.unref()
-      resolve()
-    })
-  })
-}
-
 function isHarnessAuthKey(value: string): value is HarnessAuthKey {
   return authKeys.some(authKey => authKey === value)
 }
@@ -118,56 +100,8 @@ async function login(
     const profile = await readProviderProfile()
     const providers = createHarnessProviderRegistry(profile.credentials)
     const provider = createHarnessAuthRegistry(providers)[authKey]
-    if (provider.sensosId === 'codex') {
-      console.log(
-        device
-          ? 'Starting OpenAI Codex device sign-in.'
-          : 'Opening OpenAI Codex sign-in in your browser.'
-      )
-      const credential = await provider.auth.login({
-        openUrl: openBrowser,
-        device,
-        onDeviceCode: async (verificationUrl, userCode) => {
-          console.log(`Open this URL to sign in:\n${verificationUrl}`)
-          console.log(`Enter this one-time code:\n${userCode}`)
-          try {
-            await openBrowser(verificationUrl)
-          } catch {
-            console.error('Could not open a browser. Use the URL above.')
-          }
-          console.log('Waiting for sign-in...')
-        },
-        signal: controller.signal,
-      })
-      await updateProviderProfile(profile => ({
-        ...profile,
-        activeProvider: provider.sensosId,
-        credentials: {
-          ...profile.credentials,
-          [provider.sensosId]: credential,
-        },
-      }))
-      console.log('Connected to OpenAI Codex.')
-      return
-    }
-
     const credential = await provider.auth.login({
-      openUrl: async url => {
-        console.log(`Open this URL to connect Vercel AI Gateway:\n${url}`)
-        try {
-          await openBrowser(url)
-        } catch {
-          console.error('Could not open a browser. Use the URL above.')
-        }
-      },
-      selectTeam: teams =>
-        select({
-          message: 'Choose the Vercel scope for AI Gateway',
-          choices: teams.map(team => ({
-            name: team.name,
-            value: team.id,
-          })),
-        }),
+      device,
       signal: controller.signal,
     })
     await updateProviderProfile(profile => ({
@@ -178,7 +112,6 @@ async function login(
         [provider.sensosId]: credential,
       },
     }))
-    console.log('Connected to Vercel AI Gateway.')
   } finally {
     process.removeListener('SIGINT', cancel)
   }

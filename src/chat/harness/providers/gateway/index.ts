@@ -8,10 +8,13 @@ import {
   type GatewaySpendReportParams,
   type GatewayGenerationInfoParams,
 } from '@ai-sdk/gateway'
+import { select } from '@inquirer/prompts'
 import {
   SensosHarnessProvider,
+  type HarnessLoginOptions,
   type HarnessModel,
 } from '../harness-provider'
+import { openBrowser } from '../auth-interaction'
 import {
   beginVercelLogin,
   completeVercelLogin,
@@ -29,13 +32,7 @@ export type VercelCredential = {
   teamId?: string
 }
 
-export type GatewayLoginOptions = {
-  openUrl: (url: string) => Promise<void>
-  selectTeam: (
-    teams: Array<{ id: string; name: string }>
-  ) => Promise<string>
-  signal?: AbortSignal
-}
+export type GatewayLoginOptions = HarnessLoginOptions
 
 export type GatewayCatalogModel = HarnessModel<GatewayModelId>
 
@@ -91,6 +88,12 @@ export function createGatewayHarnessProvider(
     config?: GatewayProviderSettings
     provider?: GatewayProvider
     fetch?: typeof fetch
+    openUrl?: (url: string) => Promise<void>
+    selectTeam?: (
+      teams: Array<{ id: string; name: string }>
+    ) => Promise<string>
+    log?: (message: string) => void
+    error?: (message: string) => void
   } = {}
 ) {
   const provider =
@@ -120,11 +123,18 @@ export function createGatewayHarnessProvider(
       async login(
         options: GatewayLoginOptions
       ): Promise<VercelCredential> {
+        const log = dependencies.log ?? console.log
+        const error = dependencies.error ?? console.error
+        const openUrl = dependencies.openUrl ?? openBrowser
+        log('Opening Vercel AI Gateway sign-in in your browser.')
         const device = await beginVercelLogin(options.signal)
+        log(
+          `Open this URL to connect Vercel AI Gateway:\n${device.verification_uri_complete}`
+        )
         try {
-          await options.openUrl(device.verification_uri_complete)
+          await openUrl(device.verification_uri_complete)
         } catch {
-          // The CLI has already displayed the URL and can continue polling.
+          error('Could not open a browser. Use the URL above.')
         }
         const oauthCredential = await completeVercelLogin(
           device,
@@ -139,7 +149,16 @@ export function createGatewayHarnessProvider(
             'No Vercel teams are available. Sensos requires a team-scoped AI Gateway account.'
           )
         }
-        const teamId = await options.selectTeam(teams)
+        const teamId = dependencies.selectTeam
+          ? await dependencies.selectTeam(teams)
+          : await select({
+              message: 'Choose the Vercel scope for AI Gateway',
+              choices: teams.map(team => ({
+                name: team.name,
+                value: team.id,
+              })),
+            })
+        log('Connected to Vercel AI Gateway.')
         return { ...oauthCredential, teamId }
       },
       token: value => Promise.resolve(value.accessToken),

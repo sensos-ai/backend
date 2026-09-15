@@ -11,8 +11,10 @@ import {
 } from '@/auth/oauth/codex'
 import {
   SensosHarnessProvider,
+  type HarnessLoginOptions,
   type HarnessModel,
 } from '../harness-provider'
+import { openBrowser } from '../auth-interaction'
 
 export type CodexModelId = `gpt-${string}` | (string & {})
 
@@ -27,15 +29,7 @@ export interface CodexCatalogModel extends HarnessModel<CodexModelId> {
   priority: number
 }
 
-export type CodexLoginOptions = {
-  openUrl: (url: string) => Promise<void>
-  device?: boolean
-  onDeviceCode?: (
-    verificationUrl: string,
-    userCode: string
-  ) => void | Promise<void>
-  signal?: AbortSignal
-}
+export type CodexLoginOptions = HarnessLoginOptions
 
 export const CODEX_DEFAULT_MODEL: CodexModelId = 'gpt-5.6-sol'
 
@@ -132,6 +126,9 @@ export function createCodexHarnessProvider(
   dependencies: {
     fetch?: ModelCatalogFetch
     config?: OpenaiCreateOptions
+    openUrl?: (url: string) => Promise<void>
+    log?: (message: string) => void
+    error?: (message: string) => void
   } = {}
 ) {
   const provider = codex({
@@ -153,17 +150,33 @@ export function createCodexHarnessProvider(
       return getCodexModels(credential, dependencies.fetch)
     },
     auth: {
-      login: (options: CodexLoginOptions) =>
-        options.device
-          ? loginWithCodexDevice({
-              onDeviceCode:
-                options.onDeviceCode ??
-                ((verificationUrl, userCode) => {
-                  console.log(`${verificationUrl}\n${userCode}`)
-                }),
+      async login(options: CodexLoginOptions) {
+        const log = dependencies.log ?? console.log
+        const error = dependencies.error ?? console.error
+        const openUrl = dependencies.openUrl ?? openBrowser
+        log(
+          options.device
+            ? 'Starting OpenAI Codex device sign-in.'
+            : 'Opening OpenAI Codex sign-in in your browser.'
+        )
+        const credential = options.device
+          ? await loginWithCodexDevice({
+              onDeviceCode: async (verificationUrl, userCode) => {
+                log(`Open this URL to sign in:\n${verificationUrl}`)
+                log(`Enter this one-time code:\n${userCode}`)
+                try {
+                  await openUrl(verificationUrl)
+                } catch {
+                  error('Could not open a browser. Use the URL above.')
+                }
+                log('Waiting for sign-in...')
+              },
               signal: options.signal,
             })
-          : loginWithCodex(options.openUrl, options.signal),
+          : await loginWithCodex(openUrl, options.signal)
+        log('Connected to OpenAI Codex.')
+        return credential
+      },
       token: value => Promise.resolve(value.accessToken),
       refresh: value => refreshCodexCredential(value, dependencies.fetch),
       user: value => getCodexUser(value, dependencies.fetch),
