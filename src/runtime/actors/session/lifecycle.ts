@@ -1,4 +1,5 @@
-import { isAbsolute, resolve } from 'node:path'
+import { access, mkdir } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
 import { AgentOs, createHostDirBackend } from '@rivet-dev/agentos'
 import { resolveHarnessFeatures } from '@/chat/harness'
 import {
@@ -29,6 +30,7 @@ import type {
 import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 import { defaultModelRef } from '@/chat/harness/providers'
 import { readProviderProfileSync } from '@/auth/profile'
+import { productStateDir } from '@/config/paths'
 
 const AGENTOS_SOFTWARE_ENV = 'SENSOS_AGENTOS_SOFTWARE_PATHS'
 
@@ -235,6 +237,19 @@ export const createVars: CreateVars = async context => {
   const software = parseAgentOsSoftwarePaths(
     process.env[AGENTOS_SOFTWARE_ENV]
   )
+  let hostPath = context.state.config.hostCwd
+  if (context.state.config.features.useMockModel) {
+    try {
+      await access(hostPath)
+    } catch {
+      hostPath = join(
+        productStateDir(),
+        'test-workspaces',
+        encodeURIComponent(context.state.sessionId)
+      )
+      await mkdir(hostPath, { recursive: true })
+    }
+  }
 
   return {
     vm: await AgentOs.create({
@@ -243,7 +258,7 @@ export const createVars: CreateVars = async context => {
         {
           path: context.state.config.guestCwd,
           plugin: createHostDirBackend({
-            hostPath: context.state.config.hostCwd,
+            hostPath,
             readOnly: false,
           }),
           readOnly: false,

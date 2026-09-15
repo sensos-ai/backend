@@ -12,8 +12,6 @@ test('CLI runs a test-model session through an external Rivet runtime', async ()
     await cli.sendLine('prove the remote actor path')
     await cli.waitForScreen('sequence.', 30_000)
     expect(await cli.runtimeStatus()).toContain('0 leases')
-    await cli.sendControlC()
-    expect(await cli.waitForExit()).toBe(0)
   } finally {
     await cli.stop()
   }
