@@ -19,6 +19,7 @@
     "test:e2e:run": "bun test --no-orphans tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:keyring": "bun run scripts/smoke-keyring.ts",
     "db:generate": "bun run scripts/db/generate.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write",

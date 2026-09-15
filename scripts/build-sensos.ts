@@ -49,7 +49,11 @@ if (!(requestedTarget in targetPackages)) {
 const releaseTarget = requestedTarget as ReleaseTarget
 const nativeAssets = targetPackages[releaseTarget]
 
-for (const asset of Object.values(nativeAssets)) {
+const requiredNativeAssets = [
+  '@napi-rs/keyring/package.json',
+  ...Object.values(nativeAssets),
+]
+for (const asset of requiredNativeAssets) {
   if (!(await Bun.file(resolve(`node_modules/${asset}`)).exists())) {
     throw new Error(
       `Sensos cannot build ${releaseTarget}: required native asset ${asset} is not installed. Install optional dependencies on the target platform before building.`
