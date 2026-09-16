@@ -2,7 +2,7 @@
   "$schema": "https://ui.shadcn.com/schema/registry.json",
   "name": "sensos-backend",
   "homepage": "https://github.com/sensos-ai/backend",
-  "include": ["registry/protocol/registry.json"],
+  "include": ["src/registry/protocol/registry.json"],
   "items": [
     {
       "name": "protocol",

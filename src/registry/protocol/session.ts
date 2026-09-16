@@ -1,7 +1,7 @@
 import type { ChatStatus, UIMessage, UIMessageChunk } from 'ai'
 import { z } from 'zod'
-import { protocolVersionSchema } from '~/sensos/protocol/core'
-import { modelRefSchema, type ModelRef } from '~/sensos/protocol/models'
+import { protocolVersionSchema } from '@sensos-ai/protocol/core'
+import { modelRefSchema, type ModelRef } from '@sensos-ai/protocol/models'
 
 export const runStatusSchema = z.enum([
   'queued',

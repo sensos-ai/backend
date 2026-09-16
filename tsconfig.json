@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "paths": { "@/*": ["./src/*"] },
+    "paths": {
+      "@/*": ["./src/*"],
+      "@sensos-ai/*": ["./src/registry/*"]
+    },
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",

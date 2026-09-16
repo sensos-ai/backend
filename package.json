@@ -22,6 +22,7 @@
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "test:keyring": "bun run scripts/smoke-keyring.ts",
     "registry:validate": "bunx --bun shadcn@latest registry validate registry.json",
+    "registry:validate:live": "bunx --bun shadcn@latest registry validate sensos-ai/backend",
     "db:generate": "bun run scripts/db/generate.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write",

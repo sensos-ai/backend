@@ -5,35 +5,35 @@
   "items": [
     {
       "name": "protocol-core",
-      "type": "registry:lib",
+      "type": "registry:item",
       "title": "Sensos protocol core",
       "description": "Protocol versions, actor keys, and serializable errors for Sensos engine connections.",
       "dependencies": ["zod@^4"],
       "files": [
         {
           "path": "core.ts",
-          "type": "registry:lib",
+          "type": "registry:file",
           "target": "~/sensos/protocol/core.ts"
         }
       ]
     },
     {
       "name": "protocol-models",
-      "type": "registry:lib",
+      "type": "registry:item",
       "title": "Sensos model protocol",
       "description": "Portable model references used by Sensos controller and engine processes.",
       "dependencies": ["zod@^4"],
       "files": [
         {
           "path": "models.ts",
-          "type": "registry:lib",
+          "type": "registry:file",
           "target": "~/sensos/protocol/models.ts"
         }
       ]
     },
     {
       "name": "protocol-session",
-      "type": "registry:lib",
+      "type": "registry:item",
       "title": "Sensos session protocol",
       "description": "Session inputs, actions, events, snapshots, and queue payloads shared across the engine boundary.",
       "dependencies": ["ai@^7", "zod@^4"],
@@ -44,14 +44,14 @@
       "files": [
         {
           "path": "session.ts",
-          "type": "registry:lib",
+          "type": "registry:file",
           "target": "~/sensos/protocol/session.ts"
         }
       ]
     },
     {
       "name": "protocol-streams",
-      "type": "registry:lib",
+      "type": "registry:item",
       "title": "Sensos stream protocol",
       "description": "Durable stream names, cursors, and chunk envelopes shared across the engine boundary.",
       "dependencies": ["ai@^7", "zod@^4"],
@@ -59,7 +59,7 @@
       "files": [
         {
           "path": "streams.ts",
-          "type": "registry:lib",
+          "type": "registry:file",
           "target": "~/sensos/protocol/streams.ts"
         }
       ]
