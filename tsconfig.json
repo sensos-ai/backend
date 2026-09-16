@@ -2,7 +2,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@sensos-ai/*": ["./src/registry/*"]
+      "@sensos-ai/*": ["./sensos/*"]
     },
     "target": "ESNext",
     "module": "ESNext",
@@ -19,5 +19,5 @@
     "noUncheckedSideEffectImports": true,
     "types": ["bun"]
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src", "tests", "scripts", "sensos"]
 }

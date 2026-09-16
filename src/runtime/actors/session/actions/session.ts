@@ -1,4 +1,3 @@
-import { configuredSessionCatalog } from '@/storage/session-catalog'
 import { toChatStatus } from '../config'
 import {
   deleteSessionData,
@@ -8,7 +7,7 @@ import {
   listRuns,
 } from '../db'
 import type { SessionActions } from '../types'
-import { LATEST_SENSOS_PROTOCOL_VERSION } from '@sensos-ai/protocol/core'
+import { LATEST_SENSOS_PROTOCOL_VERSION } from '@sensos-ai/shared'
 
 export const getSession: SessionActions['getSession'] = async context => {
   const [messages, meta, recentRuns] = await Promise.all([
@@ -21,20 +20,6 @@ export const getSession: SessionActions['getSession'] = async context => {
     : undefined
   const latestRun = activeRun ?? recentRuns[0]
   const runStatus = latestRun?.status ?? 'idle'
-  try {
-    await configuredSessionCatalog()?.replaceMessages(
-      context.state.sessionId,
-      meta.revision,
-      messages
-    )
-  } catch (error) {
-    context.log.warn({
-      msg: 'local transcript reconciliation failed',
-      sessionId: context.state.sessionId,
-      revision: meta.revision,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
   return {
     protocolVersion:
       context.state.protocolVersion ?? LATEST_SENSOS_PROTOCOL_VERSION,
@@ -63,7 +48,6 @@ export const setFeatures: SessionActions['setFeatures'] = (
 export const deleteSession: SessionActions['deleteSession'] =
   async context => {
     context.vars.activeRun?.abortController.abort()
-    await configuredSessionCatalog()?.tombstone(context.state.sessionId)
     await deleteSessionData(context.db)
     context.destroy()
   }

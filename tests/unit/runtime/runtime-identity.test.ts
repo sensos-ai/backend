@@ -24,7 +24,7 @@ describe('runtime identity', () => {
     )
     await writeFile(join(root, 'package.json'), '{}\n')
     await writeFile(join(root, 'bun.lock'), 'lock\n')
-    await writeFile(join(root, 'scripts', 'build-sensos.ts'), 'build\n')
+    await writeFile(join(root, 'scripts', 'build-engine.ts'), 'build\n')
 
     const initial = computeRuntimeSourceIdentity(root)
     expect(computeRuntimeSourceIdentity(root)).toBe(initial)

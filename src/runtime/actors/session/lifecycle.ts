@@ -2,10 +2,6 @@ import { access, mkdir } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentOs, createHostDirBackend } from '@rivet-dev/agentos'
 import { resolveHarnessFeatures } from '@/chat/harness'
-import {
-  configuredSessionCatalog,
-  updateCatalogTitle,
-} from '@/storage/session-catalog'
 import { DEFAULT_WORKSPACE_PATH } from '@/chat/harness/constants'
 import {
   ensureSessionMeta,
@@ -29,13 +25,12 @@ import type {
 } from './types'
 import { normalizeLegacyModelRef } from '@/chat/harness/providers/model'
 import { defaultModelRef } from '@/chat/harness/providers'
-import { readProviderProfileSync } from '@/auth/profile'
 import { productStateDir } from '@/config/paths'
 import { recordTiming } from '@/shared/timing'
 import {
   negotiateProtocolVersion,
   SENSOS_PROTOCOL_VERSIONS,
-} from '@sensos-ai/protocol/core'
+} from '@sensos-ai/shared'
 
 const AGENTOS_SOFTWARE_ENV = 'SENSOS_AGENTOS_SOFTWARE_PATHS'
 
@@ -104,9 +99,7 @@ export const createState: CreateState = (context, rawInput) => {
     config: {
       hostCwd: resolve(input.cwd),
       guestCwd: DEFAULT_WORKSPACE_PATH,
-      model:
-        input.model ??
-        defaultModelRef(readProviderProfileSync().activeProvider),
+      model: input.model ?? defaultModelRef('gateway'),
       instructions: input.instructions,
       features: resolveHarnessFeatures(input.features),
     },
@@ -139,17 +132,7 @@ function scheduleMissingSessionTitle(
       })
       if (!title || context.state.title) return
 
-      const catalog = configuredSessionCatalog()
-      const session = catalog
-        ? await updateCatalogTitle(
-            catalog,
-            context.state.sessionId,
-            context.state.catalogRevision,
-            title
-          )
-        : undefined
-      context.state.title = session?.title ?? title
-      if (session) context.state.catalogRevision = session.revision
+      context.state.title = title
       await Promise.all([
         setSessionTitle(context.db, context.state.title),
         context.saveState({ immediate: true }),
@@ -165,71 +148,24 @@ function scheduleMissingSessionTitle(
 }
 
 export const onCreate: OnCreate = async (context, _input) => {
-  const catalog = configuredSessionCatalog()
-  if (catalog) {
-    const session = await catalog.bindActor(
-      context.state.sessionId,
-      context.actorId,
-      context.state.config.hostCwd
-    )
-    context.state.catalogRevision = session.revision
-    context.state.title = session.title ?? undefined
-  }
   await ensureSessionMeta(context.db)
   if (context.state.title) {
     await setSessionTitle(context.db, context.state.title)
   }
   if (context.state.initialMessages.length) {
-    const revision = await replaceMessages(
-      context.db,
-      context.state.initialMessages
-    )
-    await catalog?.replaceMessages(
-      context.state.sessionId,
-      revision,
-      context.state.initialMessages
-    )
+    await replaceMessages(context.db, context.state.initialMessages)
   }
   scheduleMissingSessionTitle(context)
 }
 
 export const onWake: OnWake = async context => {
   migrateLegacySessionModel(context)
-  const catalog = configuredSessionCatalog()
   const persistedMeta = await getSessionMeta(context.db)
   await recoverOrphanedActiveRun({
     database: context.db,
     activeRunId: persistedMeta.activeRunId,
     liveRunId: context.vars.activeRun?.runId,
   })
-  const [meta, messages] = await Promise.all([
-    getSessionMeta(context.db),
-    listMessages(context.db),
-  ])
-  if (catalog) {
-    await catalog.replaceMessages(
-      context.state.sessionId,
-      meta.revision,
-      messages
-    )
-    let session = await catalog.get(context.state.sessionId)
-    if (!session || session.deletedAt) return
-    if (
-      session.actorId !== context.actorId ||
-      session.cwd !== context.state.config.hostCwd
-    ) {
-      session = await catalog.bindActor(
-        context.state.sessionId,
-        context.actorId,
-        context.state.config.hostCwd
-      )
-    }
-    if (session.revision > context.state.catalogRevision) {
-      context.state.catalogRevision = session.revision
-      context.state.title = session.title ?? undefined
-      if (session.title) await setSessionTitle(context.db, session.title)
-    }
-  }
   scheduleMissingSessionTitle(context)
 }
 
@@ -245,9 +181,6 @@ export const onConnect: OnConnect = async context => {
     activeRunId: meta.activeRunId,
     liveRunId: context.vars.activeRun?.runId,
   })
-  const catalog = configuredSessionCatalog()
-  if (catalog)
-    context.waitUntil(catalog.markOpened(context.state.sessionId))
   scheduleMissingSessionTitle(context)
   recordTiming('actor.connect.ready', {
     sessionId: context.state.sessionId,
@@ -314,8 +247,5 @@ export const onSleep: OnSleep = async context => {
 
 export const onDestroy: OnDestroy = async context => {
   context.vars.activeRun?.abortController.abort()
-  await Promise.all([
-    context.vars.vm.dispose(),
-    configuredSessionCatalog()?.tombstone(context.state.sessionId),
-  ])
+  await context.vars.vm.dispose()
 }

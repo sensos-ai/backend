@@ -13,9 +13,6 @@
     "test:integration": {
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/.env"]
     },
-    "test:e2e:run": {
-      "dependsOn": ["build"]
-    },
     "clean": {
       "cache": false
     },

@@ -30,7 +30,7 @@ import {
 import {
   supportedProtocolVersionsSchema,
   type SensosProtocolVersion,
-} from '@sensos-ai/protocol/core'
+} from '@sensos-ai/shared'
 
 export const sessionInputSchema = z.object({
   supportedProtocolVersions: supportedProtocolVersionsSchema,

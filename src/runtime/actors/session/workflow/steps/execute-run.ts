@@ -14,8 +14,6 @@ import {
   type SteeringMessage,
 } from '@/chat/harness'
 import { createIdGeneratorWithPrefix, errorMessage } from '@/shared/utils'
-import { configuredSessionCatalog } from '@/storage/session-catalog'
-import { updateCatalogTitle } from '@/storage/session-catalog'
 import {
   appendRunFrame,
   finalizeRun,
@@ -90,28 +88,6 @@ export function resolveRunOutcome(input: {
     status: 'failed',
     chunk: { type: 'error', errorText: error },
     error,
-  }
-}
-
-async function projectTranscript(
-  sessionId: string,
-  revision: number,
-  messages: UIMessage[],
-  log: { warn: (value: unknown) => void }
-): Promise<void> {
-  try {
-    await configuredSessionCatalog()?.replaceMessages(
-      sessionId,
-      revision,
-      messages
-    )
-  } catch (error) {
-    log.warn({
-      msg: 'local transcript projection failed',
-      sessionId,
-      revision,
-      error: error instanceof Error ? error.message : String(error),
-    })
   }
 }
 
@@ -193,12 +169,6 @@ export async function executeRun(
         })
         publishStatus('cancelled')
         const messages = await listMessages(step.db)
-        await projectTranscript(
-          step.state.sessionId,
-          finalized.revision,
-          messages,
-          step.log
-        )
         step.broadcast('messagesChanged', {
           messages,
           revision: finalized.revision,
@@ -242,17 +212,7 @@ export async function executeRun(
           })
           if (!title || step.state.title) return
 
-          const catalog = configuredSessionCatalog()
-          const session = catalog
-            ? await updateCatalogTitle(
-                catalog,
-                step.state.sessionId,
-                step.state.catalogRevision,
-                title
-              )
-            : undefined
-          step.state.title = session?.title ?? title
-          if (session) step.state.catalogRevision = session.revision
+          step.state.title = title
           await setSessionTitle(step.db, step.state.title)
           step.broadcast('titleChanged', { title: step.state.title })
         } catch (error) {
@@ -415,12 +375,6 @@ export async function executeRun(
         })
         if (status !== 'failed' || hasAssistantContent(responseMessage)) {
           const messages = await listMessages(step.db)
-          await projectTranscript(
-            step.state.sessionId,
-            finalized.revision,
-            messages,
-            step.log
-          )
           step.broadcast('messagesChanged', {
             messages,
             revision: finalized.revision,
@@ -472,12 +426,6 @@ export async function executeRun(
           chunk,
         })
         const messages = await listMessages(step.db)
-        await projectTranscript(
-          step.state.sessionId,
-          finalized.revision,
-          messages,
-          step.log
-        )
         step.broadcast('messagesChanged', {
           messages,
           revision: finalized.revision,

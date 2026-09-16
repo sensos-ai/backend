@@ -12,7 +12,6 @@ import {
   type ProviderOptions,
   type ModelRef,
 } from './providers'
-import { readProviderProfileSync } from '@/auth/profile'
 import { createTestLanguageModel } from './providers/test-model'
 import { DEFAULT_AGENT_INSTRUCTIONS } from './constants'
 import { resolveHarnessFeatures, type HarnessFeatures } from './features'
@@ -48,14 +47,10 @@ export async function createHarness(options: CreateHarnessOptions) {
   const providers =
     options.languageModel || features.useMockModel
       ? undefined
-      : await providerRegistry({}, options.model?.provider)
+      : providerRegistry()
   const resolved = providers?.resolveModel(options.model)
   const resolvedProvider =
-    options.model?.provider ??
-    resolved?.provider ??
-    (features.useMockModel
-      ? 'gateway'
-      : readProviderProfileSync().activeProvider)
+    options.model?.provider ?? resolved?.provider ?? 'gateway'
   const model =
     options.languageModel ??
     (features.useMockModel ? createTestLanguageModel() : resolved?.model)

@@ -11,32 +11,27 @@ type ReleaseTarget =
 
 const targetPackages: Record<
   ReleaseTarget,
-  { engine: string; services: string; sidecar: string; keyring: string }
+  { engine: string; services: string; sidecar: string }
 > = {
   'darwin-arm64': {
     engine: '@rivetkit/engine-cli-darwin-arm64/rivet-engine',
     services: '@rivet-dev/services-darwin-arm64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-arm64/agentos-sidecar',
-    keyring: '@napi-rs/keyring-darwin-arm64/keyring.darwin-arm64.node',
   },
   'darwin-x64': {
     engine: '@rivetkit/engine-cli-darwin-x64/rivet-engine',
     services: '@rivet-dev/services-darwin-x64/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-darwin-x64/agentos-sidecar',
-    keyring: '@napi-rs/keyring-darwin-x64/keyring.darwin-x64.node',
   },
   'linux-arm64': {
     engine: '@rivetkit/engine-cli-linux-arm64-musl/rivet-engine',
     services: '@rivet-dev/services-linux-arm64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-arm64-gnu/agentos-sidecar',
-    keyring:
-      '@napi-rs/keyring-linux-arm64-musl/keyring.linux-arm64-musl.node',
   },
   'linux-x64': {
     engine: '@rivetkit/engine-cli-linux-x64-musl/rivet-engine',
     services: '@rivet-dev/services-linux-x64-musl/rivet-services',
     sidecar: '@rivet-dev/agentos-sidecar-linux-x64-gnu/agentos-sidecar',
-    keyring: '@napi-rs/keyring-linux-x64-musl/keyring.linux-x64-musl.node',
   },
 }
 
@@ -49,10 +44,7 @@ if (!(requestedTarget in targetPackages)) {
 const releaseTarget = requestedTarget as ReleaseTarget
 const nativeAssets = targetPackages[releaseTarget]
 
-const requiredNativeAssets = [
-  '@napi-rs/keyring/package.json',
-  ...Object.values(nativeAssets),
-]
+const requiredNativeAssets = Object.values(nativeAssets)
 for (const asset of requiredNativeAssets) {
   if (!(await Bun.file(resolve(`node_modules/${asset}`)).exists())) {
     throw new Error(
@@ -97,14 +89,6 @@ const runtimeBuildId = createHash('sha256')
   .update('\0')
   .update(JSON.stringify(assetManifest))
   .digest('hex')
-
-const engineEndpoint = process.env.SENSOS_REGISTRY_ENDPOINT?.trim() ?? ''
-const streamsEndpoint = process.env.SENSOS_STREAMS_URL?.trim() ?? ''
-if (Boolean(engineEndpoint) !== Boolean(streamsEndpoint)) {
-  throw new Error(
-    'Release builds require both SENSOS_REGISTRY_ENDPOINT and SENSOS_STREAMS_URL when embedding a remote engine'
-  )
-}
 
 const makeNativeRuntimeBundlable: BunPlugin = {
   name: 'bundle-rivetkit-native-runtime',
@@ -176,19 +160,7 @@ const makeNativeRuntimeBundlable: BunPlugin = {
 const define = {
   __SENSOS_ASSET_MANIFEST__: JSON.stringify(assetManifest),
   __SENSOS_RUNTIME_BUILD_ID__: JSON.stringify(runtimeBuildId),
-  __SENSOS_REGISTRY_ENDPOINT__: JSON.stringify(engineEndpoint),
-  __SENSOS_STREAMS_URL__: JSON.stringify(streamsEndpoint),
 }
-
-const clientResult = await Bun.build({
-  entrypoints: ['src/cli/bootstrap.ts'],
-  minify: true,
-  sourcemap: 'linked',
-  define,
-  compile: {
-    outfile: 'dist/sensos',
-  },
-})
 
 const engineResult = await Bun.build({
   entrypoints: ['src/runtime/engine-bootstrap.ts'],
@@ -201,8 +173,8 @@ const engineResult = await Bun.build({
   },
 })
 
-if (!clientResult.success || !engineResult.success) {
-  for (const log of [...clientResult.logs, ...engineResult.logs]) {
+if (!engineResult.success) {
+  for (const log of engineResult.logs) {
     console.error(log)
   }
   process.exit(1)

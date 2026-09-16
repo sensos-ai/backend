@@ -16,6 +16,7 @@
       "!.output",
       "!.turbo",
       "!dist",
+      "!sensos",
       "!build",
       "!**/drizzle/meta"
     ]

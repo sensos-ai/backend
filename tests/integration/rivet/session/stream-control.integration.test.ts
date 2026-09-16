@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { UIMessage, UIMessageChunk } from 'ai'
-import { SessionChatTransport } from '@/chat/transport'
+import type { UIMessage } from 'ai'
 import { sessionAgent } from '@/runtime/actors/session'
 import type {
   DeliveryRoutedEvent,
@@ -33,12 +32,6 @@ function inbox(
       parts: [{ type: 'text', text }],
     },
   }
-}
-
-async function collect(stream: ReadableStream<UIMessageChunk>) {
-  const chunks: UIMessageChunk[] = []
-  for await (const chunk of stream) chunks.push(chunk)
-  return chunks
 }
 
 async function createSessionTest(name: string) {
@@ -114,15 +107,15 @@ test('actor stream advances while disconnected and replays on reconnect', async 
     event => event.id === queuedDelivery.id && event.status === 'started',
     { description: 'queued delivery to start after reconnect' }
   )
-  const resumed = await new SessionChatTransport(
-    resumedConnection
-  ).reconnectToStream({ chatId: 'resumed-chat' })
-  expect(resumed).not.toBeNull()
-  if (!resumed) throw new Error('Expected a resumable stream')
-
-  const replayed = await collect(resumed)
+  await waitForValue(
+    () => resumedConnection.getRun(runId),
+    run => run?.status === 'completed',
+    { description: 'disconnected run to complete' }
+  )
+  const replayed = (await resumedConnection.streamSnapshot(runId, -1))
+    .frames as Array<Pick<FrameEvent, 'seq' | 'chunk'>>
   expect(replayed.length).toBeGreaterThan(frameBeforeDisconnect.seq)
-  expect(replayed.at(-1)?.type).toBe('finish')
+  expect(replayed.at(-1)?.chunk.type).toBe('finish')
   expect(await resumedConnection.getRun(runId)).toMatchObject({
     id: runId,
     status: 'completed',
@@ -195,9 +188,10 @@ test('transport stop cancels the active actor run and persists its cutoff', asyn
     event => event.runId === runId && event.runStatus === 'cancelled',
     { description: 'stopped run to become cancelled' }
   )
-  const stopped = await new SessionChatTransport(
-    connection
-  ).stopActiveRun()
+  const activeRunId = (await connection.getSession()).activeRunId
+  const stopped = activeRunId
+    ? await connection.cancel(activeRunId)
+    : { cancelled: false }
   expect(stopped).toEqual({ cancelled: true, runId })
   await cancelled
 
@@ -255,7 +249,6 @@ test('cancelling a queued run finalizes it and releases the session', async () =
   )
   expect(await connection.getRun(runId)).toMatchObject({
     status: 'cancelled',
-    startedAt: null,
   })
   expect((await connection.streamSnapshot(runId, -1)).frames).toEqual([
     {

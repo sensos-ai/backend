@@ -5,7 +5,7 @@ import { streamText } from 'hono/streaming'
 import {
   LATEST_SENSOS_PROTOCOL_VERSION,
   SENSOS_PROTOCOL_VERSIONS,
-} from '@sensos-ai/protocol/core'
+} from '@sensos-ai/shared'
 
 const app = new Hono()
 app.use('*', cors())

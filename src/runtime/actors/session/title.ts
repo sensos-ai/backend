@@ -16,7 +16,6 @@ import {
   loggingMiddleware,
 } from '@/chat/harness/providers'
 import type { ModelProvider } from '@/chat/harness/providers'
-import { readProviderProfileSync } from '@/auth/profile'
 import type { ModelRef } from '@/chat/harness/providers/model'
 
 export const TITLE_MODEL: GatewayModelId = 'openai/gpt-5-nano'
@@ -115,8 +114,7 @@ export async function generateSessionTitle(
     return normalizeSessionTitle(result.text)
   }
 
-  const activeProvider =
-    options.provider ?? readProviderProfileSync().activeProvider
+  const activeProvider = options.provider ?? 'gateway'
   const resolved = await languageModelForRef(titleModelRef(activeProvider))
   const model = wrapLanguageModel({
     model: resolved.model,

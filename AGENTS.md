@@ -22,12 +22,14 @@
 Read [`.agents/reference/testing.md`](.agents/reference/testing.md) before
 changing or running tests, fixtures, helpers, runners, or test infrastructure.
 
-## Local runtime compatibility
+## Engine runtime
 
-The detached runtime can remain active after the CLI exits. The CLI compares the protocol version and build ID before it reuses that runtime. This check prevents the CLI from using stale runtime code.
+Read [`.agents/reference/rivetkit/durable-runs.md`](.agents/reference/rivetkit/durable-runs.md)
+before changing actor execution, runtime activity ownership, stream persistence
+or replay, or cancellation.
 
-Read [`.agents/reference/rivetkit/durable-runs.md`](.agents/reference/rivetkit/durable-runs.md) before changing run execution, runtime activity ownership, stream persistence or replay, cancellation, or CLI session attachment and switching.
-
-- Do not set the build ID by hand. Development computes it from runtime source files. `bun run turbo:build` adds it to the compiled CLI. The CLI uses this identity to decide whether an existing local engine can be reused.
-- Run `bun run turbo:build` after source, dependency, or bundled asset changes when you test `dist/sensos`.
-- If an incompatible runtime has active leases, close its chats or run `sensos runtime stop`. Then start the CLI again.
+- This repository builds and hosts `sensos-engine`; it does not own the CLI.
+- `@sensos-ai/shared` is installed under `sensos/shared` and owns the public
+  wire contract. Do not recreate protocol sources in the backend.
+- Do not set the engine build ID by hand. Development computes it from engine
+  source files; `bun run turbo:build` embeds it in `dist/sensos-engine`.

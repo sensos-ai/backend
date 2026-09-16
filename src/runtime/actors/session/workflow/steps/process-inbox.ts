@@ -1,5 +1,3 @@
-import type { UIMessage } from 'ai'
-import { configuredSessionCatalog } from '@/storage/session-catalog'
 import type { InboxMessage, RunCommand } from '../../config'
 import {
   appendMessageIfAbsent,
@@ -43,28 +41,6 @@ function toRunCommand(
     idempotencyId: inboxMessage.id,
     model,
     message: messageWithOrigin(inboxMessage),
-  }
-}
-
-async function projectTranscript(
-  sessionId: string,
-  revision: number,
-  messages: UIMessage[],
-  log: { warn: (value: unknown) => void }
-): Promise<void> {
-  try {
-    await configuredSessionCatalog()?.replaceMessages(
-      sessionId,
-      revision,
-      messages
-    )
-  } catch (error) {
-    log.warn({
-      msg: 'local transcript projection failed',
-      sessionId,
-      revision,
-      error: error instanceof Error ? error.message : String(error),
-    })
   }
 }
 
@@ -132,12 +108,6 @@ export async function processInbox(
           new Date(inboxMessage.createdAt)
         )
         const messages = await listMessages(step.db)
-        await projectTranscript(
-          step.state.sessionId,
-          appended.revision,
-          messages,
-          step.log
-        )
         step.broadcast('messagesChanged', {
           messages,
           revision: appended.revision,

@@ -11,9 +11,9 @@ boundary it actually crosses. Read `package.json` before running commands.
 - `tests/integration/rivet/<actor>` owns actor behavior through a real local
   Rivet registry and engine. It proves actor, persistence, and transport
   integration, but not CLI command registration or terminal behavior.
-- `tests/e2e/cli` owns critical journeys through the compiled `dist/sensos`, a
-  real PTY, runtime, actor, persistence, and scripted provider. Only this layer
-  proves that a user-facing CLI or slash command is wired end to end.
+- Cross-repository CLI journeys belong to the `sensos` repository. Backend
+  tests may expose an explicit server or engine command, but do not own CLI,
+  TUI, credential-store, or terminal-driving fixtures.
 - Stress and coverage commands are diagnostic layers. Use stress runs for
   concurrency/order-sensitive cases and preserve any reported seed. Use
   coverage to find untested critical paths, not to optimize a global number.
@@ -115,21 +115,6 @@ isolation when modifying the runner. Tests that need provider behavior must use
 the deterministic test model or explicitly injected credentials; real-provider
 credential tests remain opt-in smoke tests.
 
-### CLI end-to-end tests
-
-Build and run every compiled CLI end-to-end test:
-
-```sh
-bun run test:e2e
-```
-
-After a current build exists, run one compiled CLI end-to-end test file:
-
-```sh
-bun run turbo:build
-bun test --no-orphans tests/e2e/cli/session-resume.test.ts
-```
-
 ### Validation recipes
 
 Run all test layers through Turbo:
@@ -157,12 +142,10 @@ Check the patch for whitespace errors:
 git diff --check
 ```
 
-`test:e2e` builds the executable. Run `bun run build` explicitly before manual
-checks of `dist/sensos`, or use the cached `bun run turbo:build`. The Turbo test
-task runs unit, integration, and E2E suites concurrently while building before
-the E2E leaf. Run `bun run turbo:check` before handing off a phase or a
-cross-layer change; use `test:stress` when concurrency, ordering, cancellation,
-or lifecycle behavior changed.
+Run `bun run turbo:build` before manually testing `dist/sensos-engine`. Run
+`bun run turbo:check` before handing off an engine or cross-layer change; use
+`test:stress` when concurrency, ordering, cancellation, or lifecycle behavior
+changed.
 
 Keep CI simple during rapid pre-launch development: it should exercise the
 same deterministic commands, reject empty required suites, and retain useful

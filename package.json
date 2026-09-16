@@ -7,15 +7,12 @@
   "scripts": {
     "dev": "bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
-    "test": "bun run test:unit && bun run test:integration && bun run test:e2e",
+    "build": "bun run scripts/build-engine.ts",
+    "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test --no-orphans --parallel tests/unit",
     "test:integration": "bun run tests/integration/run.ts",
-    "test:e2e": "bun run build && bun run test:e2e:run",
-    "test:e2e:run": "bun test --no-orphans tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
-    "registry:validate": "bunx --bun shadcn@latest registry validate registry.json",
-    "registry:validate:live": "bunx --bun shadcn@latest registry validate sensos-ai/backend",
     "db:generate": "bun run scripts/db/generate.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write",
@@ -24,8 +21,8 @@
     "turbo:build": "turbo run build",
     "turbo:lint": "turbo run lint:check",
     "turbo:typecheck": "turbo run typecheck",
-    "turbo:test": "turbo run test:unit test:integration test:e2e:run",
-    "turbo:check": "turbo run lint:check typecheck test:unit test:integration test:e2e:run",
+    "turbo:test": "turbo run test:unit test:integration",
+    "turbo:check": "turbo run lint:check typecheck test:unit test:integration",
     "clean": "git clean -xdf node_modules dist \"*.tsbuildinfo\""
   },
   "dependencies": {

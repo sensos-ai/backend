@@ -1,6 +1,4 @@
-import type { UIMessage } from 'ai'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
-import { configuredSessionCatalog } from '@/storage/session-catalog'
 import {
   toChatStatus,
   type InboxMessage,
@@ -18,28 +16,6 @@ import { recordTiming } from '@/shared/timing'
 
 const createMessageId = createIdGeneratorWithPrefix('msg')
 const createRunId = createIdGeneratorWithPrefix('run')
-
-async function projectTranscript(
-  sessionId: string,
-  revision: number,
-  messages: UIMessage[],
-  log: { warn: (value: unknown) => void }
-): Promise<void> {
-  try {
-    await configuredSessionCatalog()?.replaceMessages(
-      sessionId,
-      revision,
-      messages
-    )
-  } catch (error) {
-    log.warn({
-      msg: 'local transcript projection failed',
-      sessionId,
-      revision,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
 
 export async function submitRun(
   context: SessionWorkflowContext
@@ -69,15 +45,7 @@ export async function submitRun(
     })
 
     if (result.created) {
-      const catalog = configuredSessionCatalog()
-      if (catalog) step.waitUntil(catalog.touch(step.state.sessionId))
       const messages = await listMessages(step.db)
-      await projectTranscript(
-        step.state.sessionId,
-        result.revision,
-        messages,
-        step.log
-      )
       step.broadcast('messagesChanged', {
         messages,
         revision: result.revision,

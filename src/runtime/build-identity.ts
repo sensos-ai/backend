@@ -6,7 +6,7 @@ const SOURCE_DIRECTORIES = ['src'] as const
 const SOURCE_FILES = [
   'package.json',
   'bun.lock',
-  'scripts/build-sensos.ts',
+  'scripts/build-engine.ts',
 ] as const
 
 function collectFiles(directory: string): string[] {
