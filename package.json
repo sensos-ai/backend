@@ -1,18 +1,12 @@
 {
-  "name": "sensos",
+  "name": "sensos-backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.4.0",
-  "bin": {
-    "sensos": "./dist/sensos",
-    "sensos-engine": "./dist/sensos-engine",
-    "sensos-dev": "./src/cli/bootstrap.ts"
-  },
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
-    "build": "bun run scripts/build-sensos.ts",
     "test": "bun run test:unit && bun run test:integration && bun run test:e2e",
     "test:unit": "bun test --no-orphans --parallel tests/unit",
     "test:integration": "bun run tests/integration/run.ts",
@@ -20,7 +14,6 @@
     "test:e2e:run": "bun test --no-orphans tests/e2e",
     "test:stress": "bun run test:unit --randomize --rerun-each=20",
     "test:coverage": "bun run test:unit --coverage --coverage-reporter=text --coverage-reporter=lcov",
-    "test:keyring": "bun run scripts/smoke-keyring.ts",
     "registry:validate": "bunx --bun shadcn@latest registry validate registry.json",
     "registry:validate:live": "bunx --bun shadcn@latest registry validate sensos-ai/backend",
     "db:generate": "bun run scripts/db/generate.ts",
@@ -33,16 +26,12 @@
     "turbo:typecheck": "turbo run typecheck",
     "turbo:test": "turbo run test:unit test:integration test:e2e:run",
     "turbo:check": "turbo run lint:check typecheck test:unit test:integration test:e2e:run",
-    "global:link": "bun run build && bun link",
-    "global:unlink": "bun unlink",
     "clean": "git clean -xdf node_modules dist \"*.tsbuildinfo\""
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.80",
     "@ai-sdk/openai": "^4.0.66",
     "@durable-streams/client": "^0.2.7",
-    "@inquirer/prompts": "^8.7.2",
-    "@napi-rs/keyring": "2.1.0",
     "@rivet-dev/agentos": "^0.2.19",
     "@rivet-dev/services": "^0.1.7",
     "ai": "^7.0.97",
@@ -54,7 +43,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",
-    "@modelcontextprotocol/client": "2.0.0",
     "@types/bun": "^1.4.0",
     "@types/node": "^26.1.1",
     "drizzle-kit": "0.31.8",
