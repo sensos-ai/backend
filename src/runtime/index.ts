@@ -8,6 +8,7 @@ import { prepareAgentOsAssets } from './agentos-assets'
 import { onRuntimeActivityChange, runtimeActivityCount } from './activity'
 import { registry } from './actors/registry'
 import { prepareRivetEngine, prepareRivetServices } from './assets'
+import { isCompatibleRuntime } from './compatibility'
 import {
   DEFAULT_IDLE_TTL_MS,
   HEARTBEAT_INTERVAL_MS,
@@ -19,7 +20,6 @@ import {
   RUNTIME_PORT,
   RUNTIME_STREAMS_ENDPOINT,
   RUNTIME_STREAMS_PORT,
-  RUNTIME_PROTOCOL_VERSION,
 } from './constants'
 
 export {
@@ -27,7 +27,6 @@ export {
   RUNTIME_ENDPOINT,
   RUNTIME_HOST,
   RUNTIME_PORT,
-  RUNTIME_PROTOCOL_VERSION,
 } from './constants'
 const createLeaseId = createIdGeneratorWithPrefix('lease')
 const createOwnershipToken = createIdGeneratorWithPrefix('runtime')
@@ -44,19 +43,11 @@ type RuntimeResponse = {
   ready?: boolean
   pid?: number
   leases?: number
-  protocolVersion?: string
   buildId?: string
   error?: string
 }
 
-export function isCompatibleRuntime(
-  response: Pick<RuntimeResponse, 'protocolVersion' | 'buildId'>
-): boolean {
-  return (
-    response.protocolVersion === RUNTIME_PROTOCOL_VERSION &&
-    response.buildId === RUNTIME_BUILD_ID
-  )
-}
+export { isCompatibleRuntime } from './compatibility'
 
 type RuntimePaths = {
   directory: string
@@ -226,7 +217,6 @@ async function hasLiveRecordedSupervisor(
     const state = JSON.parse(await readFile(paths.state, 'utf8')) as {
       pid?: number
       token?: string
-      protocolVersion?: string
       buildId?: string
     }
     if (!state.pid || !state.token) return false
@@ -403,7 +393,6 @@ export async function runtimeStatus(
       ok: true,
       ready: false,
       leases: 0,
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       buildId: RUNTIME_BUILD_ID,
     }
   }
@@ -445,7 +434,6 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
     JSON.stringify({
       pid: process.pid,
       token: ownershipToken,
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       buildId: RUNTIME_BUILD_ID,
       port: RUNTIME_PORT,
       socket: paths.socket,
@@ -549,7 +537,6 @@ export async function runRuntimeSupervisor(root: string): Promise<never> {
               ]),
               pid: process.pid,
               leases: leases.size,
-              protocolVersion: RUNTIME_PROTOCOL_VERSION,
               buildId: RUNTIME_BUILD_ID,
             })
             return

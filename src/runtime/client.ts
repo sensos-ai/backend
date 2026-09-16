@@ -4,11 +4,11 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { createIdGeneratorWithPrefix } from '@/shared/utils'
+import { isCompatibleRuntime } from './compatibility'
 import {
   HEARTBEAT_INTERVAL_MS,
   RUNTIME_BUILD_ID,
   RUNTIME_ENDPOINT,
-  RUNTIME_PROTOCOL_VERSION,
 } from './constants'
 
 const createLeaseId = createIdGeneratorWithPrefix('lease')
@@ -25,7 +25,6 @@ export type RuntimeResponse = {
   ready?: boolean
   pid?: number
   leases?: number
-  protocolVersion?: string
   buildId?: string
   error?: string
 }
@@ -47,15 +46,6 @@ function runtimePaths(root: string): RuntimePaths {
     lock: join(directory, 'startup.lock'),
     log: join(directory, 'runtime.log'),
   }
-}
-
-function isCompatibleRuntime(
-  response: Pick<RuntimeResponse, 'protocolVersion' | 'buildId'>
-): boolean {
-  return (
-    response.protocolVersion === RUNTIME_PROTOCOL_VERSION &&
-    response.buildId === RUNTIME_BUILD_ID
-  )
 }
 
 async function requestRuntime(
@@ -290,7 +280,6 @@ export async function runtimeStatus(
       ok: true,
       ready: false,
       leases: 0,
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
       buildId: RUNTIME_BUILD_ID,
     }
   }

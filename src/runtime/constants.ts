@@ -17,8 +17,6 @@ export const RUNTIME_PORT = configuredRuntimePort
 export const RUNTIME_ENDPOINT = `http://${RUNTIME_HOST}:${RUNTIME_PORT}`
 export const RUNTIME_STREAMS_PORT = RUNTIME_PORT + 2
 export const RUNTIME_STREAMS_ENDPOINT = `http://${RUNTIME_HOST}:${RUNTIME_STREAMS_PORT}`
-export const RUNTIME_PROTOCOL_VERSION =
-  process.env.SENSOS_RUNTIME_PROTOCOL_VERSION?.trim() || '1'
 export const RUNTIME_BUILD_ID =
   typeof __SENSOS_RUNTIME_BUILD_ID__ === 'undefined'
     ? computeRuntimeSourceIdentity(resolve(import.meta.dir, '../..'))

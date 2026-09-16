@@ -28,8 +28,6 @@ The detached runtime can remain active after the CLI exits. The CLI compares the
 
 Read [`.agents/reference/rivetkit/durable-runs.md`](.agents/reference/rivetkit/durable-runs.md) before changing run execution, runtime activity ownership, stream persistence or replay, cancellation, or CLI session attachment and switching.
 
-- Change `SENSOS_RUNTIME_PROTOCOL_VERSION` in `.env` and `.env.example` when the CLI-to-runtime request or response schema changes. Use the next integer.
-- Keep the protocol version unchanged for source changes that do not change this wire contract.
-- Do not set the build ID by hand. Development computes it from runtime source files. `bun run turbo:build` adds it to the compiled CLI.
+- Do not set the build ID by hand. Development computes it from runtime source files. `bun run turbo:build` adds it to the compiled CLI. The CLI uses this identity to decide whether an existing local engine can be reused.
 - Run `bun run turbo:build` after source, dependency, or bundled asset changes when you test `dist/sensos`.
 - If an incompatible runtime has active leases, close its chats or run `sensos runtime stop`. Then start the CLI again.
