@@ -5,6 +5,16 @@
   "cacheMaxSize": "20GB",
   "globalEnv": ["DATABASE_URL"],
   "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": []
+    },
+    "start": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["build"]
+    },
     "build": {
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/.env"],
       "outputs": ["dist/**"]
