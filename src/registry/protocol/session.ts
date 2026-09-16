@@ -1,6 +1,6 @@
 import type { ChatStatus, UIMessage, UIMessageChunk } from 'ai'
 import { z } from 'zod'
-import { protocolVersionSchema } from '@sensos-ai/protocol/core'
+import { supportedProtocolVersionsSchema } from '@sensos-ai/protocol/core'
 import { modelRefSchema, type ModelRef } from '@sensos-ai/protocol/models'
 
 export const runStatusSchema = z.enum([
@@ -16,7 +16,7 @@ export type RunStatus = z.infer<typeof runStatusSchema>
 export type SessionStatus = 'idle' | RunStatus
 
 export const sessionInputSchema = z.object({
-  protocolVersion: protocolVersionSchema,
+  supportedProtocolVersions: supportedProtocolVersionsSchema,
   sessionId: z.string().min(1),
   catalogRevision: z.number().int().nonnegative().optional(),
   cwd: z.string().min(1),
@@ -53,6 +53,7 @@ export type RunCompletion = {
 }
 
 export type SessionSnapshot = {
+  protocolVersion: number
   messages: UIMessage[]
   revision: number
   runStatus: SessionStatus

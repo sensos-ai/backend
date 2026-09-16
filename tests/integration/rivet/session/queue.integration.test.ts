@@ -56,7 +56,10 @@ test('run submission persists once and deduplicates retries', async () => {
     'run submission deduplication'
   )
   const handle = client.session.getOrCreate([trackedActorKey('session')], {
-    createWithInput: { cwd: process.cwd() },
+    createWithInput: {
+      supportedProtocolVersions: [1],
+      cwd: process.cwd(),
+    },
     params: { clientId: actorKey('client') },
   })
   const message: UIMessage = {
@@ -116,6 +119,7 @@ test('first run generates and broadcasts the session title', async () => {
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
       createWithInput: {
+        supportedProtocolVersions: [1],
         cwd: process.cwd(),
         features: { useMockModel: true },
       },
@@ -150,7 +154,10 @@ test('now delivery interrupts the active run and starts a successor', async () =
     await createSessionTest('now actor delivery')
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
-      createWithInput: { cwd: process.cwd() },
+      createWithInput: {
+        supportedProtocolVersions: [1],
+        cwd: process.cwd(),
+      },
     })
     .connect({ clientId: actorKey('client') })
   cleanup(() => connection.dispose())
@@ -229,7 +236,10 @@ test('adaptive delivery steers the active run without replacing it', async () =>
     await createSessionTest('adaptive actor delivery')
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
-      createWithInput: { cwd: process.cwd() },
+      createWithInput: {
+        supportedProtocolVersions: [1],
+        cwd: process.cwd(),
+      },
     })
     .connect({ clientId: actorKey('client') })
   cleanup(() => connection.dispose())
@@ -272,7 +282,10 @@ test('next delivery waits for the active run before starting once', async () => 
     await createSessionTest('next actor delivery')
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
-      createWithInput: { cwd: process.cwd() },
+      createWithInput: {
+        supportedProtocolVersions: [1],
+        cwd: process.cwd(),
+      },
     })
     .connect({ clientId: actorKey('client') })
   cleanup(() => connection.dispose())

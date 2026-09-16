@@ -27,8 +27,13 @@ import {
   modelRefSchema,
   type ModelRef,
 } from '@/chat/harness/providers/model'
+import {
+  supportedProtocolVersionsSchema,
+  type SensosProtocolVersion,
+} from '@sensos-ai/protocol/core'
 
 export const sessionInputSchema = z.object({
+  supportedProtocolVersions: supportedProtocolVersionsSchema,
   sessionId: z.string().min(1).optional(),
   catalogRevision: z.number().int().nonnegative().optional(),
   cwd: z.string().min(1),
@@ -49,6 +54,7 @@ export type SessionConfig = {
 }
 
 export type State = {
+  protocolVersion?: SensosProtocolVersion
   sessionId: string
   catalogRevision: number
   config: SessionConfig

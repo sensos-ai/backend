@@ -32,6 +32,10 @@ import { defaultModelRef } from '@/chat/harness/providers'
 import { readProviderProfileSync } from '@/auth/profile'
 import { productStateDir } from '@/config/paths'
 import { recordTiming } from '@/shared/timing'
+import {
+  negotiateProtocolVersion,
+  SENSOS_PROTOCOL_VERSIONS,
+} from '@sensos-ai/protocol/core'
 
 const AGENTOS_SOFTWARE_ENV = 'SENSOS_AGENTOS_SOFTWARE_PATHS'
 
@@ -80,10 +84,19 @@ export function parseAgentOsSoftwarePaths(
 
 export const createState: CreateState = (context, rawInput) => {
   const input = sessionInputSchema.parse(rawInput)
+  const protocolVersion = negotiateProtocolVersion(
+    input.supportedProtocolVersions
+  )
+  if (protocolVersion === undefined) {
+    throw new Error(
+      `UNSUPPORTED_PROTOCOL_VERSION: client offered ${input.supportedProtocolVersions.join(', ')}; server supports ${SENSOS_PROTOCOL_VERSIONS.join(', ')}`
+    )
+  }
   const sessionId = input.sessionId ?? context.key?.[0]
   if (!sessionId) throw new Error('Session id is required')
 
   return {
+    protocolVersion,
     sessionId,
     catalogRevision: input.catalogRevision ?? 0,
     title: undefined,

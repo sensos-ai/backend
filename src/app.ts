@@ -2,6 +2,10 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { streamText } from 'hono/streaming'
+import {
+  LATEST_SENSOS_PROTOCOL_VERSION,
+  SENSOS_PROTOCOL_VERSIONS,
+} from '@sensos-ai/protocol/core'
 
 const app = new Hono()
 app.use('*', cors())
@@ -41,5 +45,12 @@ app.get('/', c => {
 })
 
 app.get('/health', c => c.text('OK'))
+
+app.get('/api/protocol', c =>
+  c.json({
+    protocolVersion: LATEST_SENSOS_PROTOCOL_VERSION,
+    supportedProtocolVersions: SENSOS_PROTOCOL_VERSIONS,
+  })
+)
 
 export default app

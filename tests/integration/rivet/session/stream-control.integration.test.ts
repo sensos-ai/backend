@@ -51,7 +51,10 @@ test('actor stream advances while disconnected and replays on reconnect', async 
   const { client, actorKey, trackedActorKey, cleanup } =
     await createSessionTest('stream disconnect recovery')
   const handle = client.session.getOrCreate([trackedActorKey('session')], {
-    createWithInput: { cwd: process.cwd() },
+    createWithInput: {
+      supportedProtocolVersions: [1],
+      cwd: process.cwd(),
+    },
   })
   const firstConnection = handle.connect({ clientId: actorKey('client') })
   cleanup(() => firstConnection.dispose())
@@ -153,7 +156,10 @@ test('transport stop cancels the active actor run and persists its cutoff', asyn
     await createSessionTest('transport stop behavior')
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
-      createWithInput: { cwd: process.cwd() },
+      createWithInput: {
+        supportedProtocolVersions: [1],
+        cwd: process.cwd(),
+      },
     })
     .connect({ clientId: actorKey('client') })
   cleanup(() => connection.dispose())
@@ -220,7 +226,10 @@ test('cancelling a queued run finalizes it and releases the session', async () =
     await createSessionTest('queued cancellation')
   const connection = client.session
     .getOrCreate([trackedActorKey('session')], {
-      createWithInput: { cwd: process.cwd() },
+      createWithInput: {
+        supportedProtocolVersions: [1],
+        cwd: process.cwd(),
+      },
     })
     .connect({ clientId: actorKey('client') })
   cleanup(() => connection.dispose())

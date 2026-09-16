@@ -8,6 +8,7 @@ import {
   listRuns,
 } from '../db'
 import type { SessionActions } from '../types'
+import { LATEST_SENSOS_PROTOCOL_VERSION } from '@sensos-ai/protocol/core'
 
 export const getSession: SessionActions['getSession'] = async context => {
   const [messages, meta, recentRuns] = await Promise.all([
@@ -35,6 +36,8 @@ export const getSession: SessionActions['getSession'] = async context => {
     })
   }
   return {
+    protocolVersion:
+      context.state.protocolVersion ?? LATEST_SENSOS_PROTOCOL_VERSION,
     messages,
     revision: meta.revision,
     runStatus,

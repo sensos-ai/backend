@@ -1,8 +1,31 @@
 import { z } from 'zod'
 
-export const SENSOS_PROTOCOL_VERSION = 1 as const
+export const SENSOS_PROTOCOL_VERSIONS = [1] as const
+export const LATEST_SENSOS_PROTOCOL_VERSION = SENSOS_PROTOCOL_VERSIONS[0]
 
-export const protocolVersionSchema = z.literal(SENSOS_PROTOCOL_VERSION)
+export type SensosProtocolVersion =
+  (typeof SENSOS_PROTOCOL_VERSIONS)[number]
+
+export const protocolVersionSchema = z.number().int().positive()
+export const supportedProtocolVersionsSchema = z
+  .array(protocolVersionSchema)
+  .min(1)
+
+export const protocolDiscoverySchema = z.object({
+  protocolVersion: protocolVersionSchema,
+  supportedProtocolVersions: supportedProtocolVersionsSchema,
+})
+
+export type ProtocolDiscovery = z.infer<typeof protocolDiscoverySchema>
+
+export function negotiateProtocolVersion(
+  requested: readonly number[]
+): SensosProtocolVersion | undefined {
+  const requestedVersions = new Set(requested)
+  return SENSOS_PROTOCOL_VERSIONS.find(version =>
+    requestedVersions.has(version)
+  )
+}
 
 export const sessionActorKeySchema = z.tuple([
   z.string().min(1),

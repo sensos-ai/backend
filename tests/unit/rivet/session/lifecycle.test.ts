@@ -36,6 +36,7 @@ describe('createState', () => {
     ]
 
     const state = await createState({} as never, {
+      supportedProtocolVersions: [1],
       sessionId: 'chat_initial',
       cwd: '/tmp/workspace',
       initialMessages,
@@ -46,11 +47,31 @@ describe('createState', () => {
 
   test('resolves feature flags into globally available actor config', async () => {
     const state = await createState({} as never, {
+      supportedProtocolVersions: [1],
       sessionId: 'chat_features',
       cwd: '/tmp/workspace',
       features: { useMockModel: true },
     })
 
     expect(state.config.features).toEqual({ useMockModel: true })
+  })
+
+  test('selects a mutual protocol and rejects incompatible clients', async () => {
+    const state = await createState({} as never, {
+      supportedProtocolVersions: [2, 1],
+      sessionId: 'chat_protocol',
+      cwd: '/tmp/workspace',
+      features: { useMockModel: true },
+    })
+
+    expect(state.protocolVersion).toBe(1)
+    expect(() =>
+      createState({} as never, {
+        supportedProtocolVersions: [999],
+        sessionId: 'chat_incompatible',
+        cwd: '/tmp/workspace',
+        features: { useMockModel: true },
+      })
+    ).toThrow('UNSUPPORTED_PROTOCOL_VERSION')
   })
 })
